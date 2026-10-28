@@ -1,0 +1,66 @@
+# Prashast On boarding status :: SSM, Purba Bardhaman
+
+A web portal for monitoring PRASHAST teacher onboarding by block, school and day.
+It is a static site: no server or database is needed, and it runs on **GitHub Pages**.
+
+## Features
+
+| Page | What it shows |
+|---|---|
+| Dashboard | District KPIs with change since the previous day, key insights, ranked block chart, school category chart, daily trend, top/bottom 5 blocks |
+| Block-wise Status | Rank, schools, teachers, onboarded, pending, %, daily change, 100% / 1-99% / 0% school counts, Leading / Moderate / Lagging status. Tap a block to open its schools |
+| Leading & Lagging | Top 10 and bottom 10 blocks, top gainers, least progress, most pending teachers, most 0% schools, priority schools, large 0% schools, best improving schools |
+| All / 100% / 1-99% / 0% Schools | School lists filtered by block, category and search, with change since the previous day |
+| Day-wise Comparison | Any two dates side by side: block-wise change, plus schools that improved, became 100%, moved out of 0%, stayed at 0% or decreased |
+| Daily Trend | District summary for every date, plus a block × date matrix (%, onboarded, 0% schools, 100% schools) |
+| Upload / Manage Data | Upload daily files, delete a day, back up and restore |
+
+Every table has **Excel** and **PDF** download buttons. Each file carries the header
+*"Prashast On boarding status :: SSM, Purba Bardhaman"*, the report title, the data date and the generation time.
+The layout works on phones, tablets and desktops.
+
+**Leading / Lagging rule:** blocks are ranked by onboarded %. The top quarter are *Leading*, the bottom quarter are *Lagging*, and the rest are *Moderate*.
+
+## Daily use
+
+1. On the PRASHAST portal, run the Tampermonkey script `prashast-teacher-onboarding-all-blocks.user.js`. It downloads
+   `Teacher_Onboarding_School_Wise_All_Blocks_YYYY-MM-DD.xlsx`.
+2. Open the portal and go to **Upload / Manage Data**, then upload that file.
+   The date is read from the file name. If the name has no date, choose one in the *Data date* box.
+3. Uploading again for the same date replaces that day's data.
+
+Uploaded data is stored **in that browser only** (IndexedDB). Use *Download backup* to move it to another device.
+
+## Publish on GitHub Pages
+
+1. Create a repository, for example `prashast-monitor`, and upload all the files in this folder:
+   `index.html`, `css/`, `js/`, `data/`, `.nojekyll`.
+2. Go to **Settings → Pages → Build and deployment**. Set *Source* to **Deploy from a branch**, choose branch `main` and folder `/ (root)`, then save.
+3. After about a minute the portal is live at `https://<your-username>.github.io/prashast-monitor/`.
+
+### Optional: let everyone see the same data
+
+So that every officer who opens the link sees the full history without uploading anything, commit the daily files to the repo:
+
+1. Put each day's Excel file in `data/`, keeping the date in its file name.
+2. List the files in `data/manifest.json`:
+   ```json
+   [
+     "Teacher_Onboarding_School_Wise_All_Blocks_2026-10-27.xlsx",
+     "Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx"
+   ]
+   ```
+3. Commit. These dates appear for everyone, marked "from repo". If someone uploads a file for the same date in their own browser, their upload is used instead.
+
+> If the repository is public, anyone with the link can download files in `data/`. Make the repo private (GitHub Pages on private repos needs a paid plan) or keep data upload-only if that matters.
+
+## Accepted file format
+
+The first sheet that has a **School Name** column is used. The other columns are found by name:
+`Block Name`, `School Name`, `UDISE Code`, `Total Teachers`, `Teachers Onboarded`.
+The portal's own format `School Name | UDISE` in one column also works. Percentages are recalculated from the counts.
+
+## Local testing
+
+Open the folder through any web server, for example XAMPP: `http://localhost/prashast/prashast-monitor/`.
+Opening `index.html` directly from disk also works, but the `data/manifest.json` loading needs a web server.
