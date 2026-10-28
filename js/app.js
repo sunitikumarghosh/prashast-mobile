@@ -4,6 +4,7 @@
 'use strict';
 
 const HEADER = 'Prashast On boarding status :: SSM, Purba Bardhaman';
+const CREDIT = 'An in-house production of SSM, Purba Bardhaman';
 const CAT = { full: '100%', part: '1-99%', zero: '0%', na: 'No teachers' };
 const NUM_TYPES = new Set(['idx', 'n', 'p', 'd', 'dp']);
 
@@ -332,7 +333,7 @@ function exportExcel(spec) {
         [HEADER],
         [title],
         [`Data as on: ${fmtD(state.cur)}${sub ? '  |  ' + sub : ''}`],
-        [`Generated on: ${new Date().toLocaleString('en-IN')}`],
+        [`Generated on: ${new Date().toLocaleString('en-IN')}  |  ${CREDIT}`],
         [],
         cols.map(c => c.h),
         ...rows.map((r, i) => cols.map(c => cellOut(c, r, i, false))),
@@ -393,6 +394,7 @@ function exportPDF(spec) {
             doc.setFontSize(7.5);
             doc.setTextColor(110);
             doc.text(`Generated on ${generated}`, 8, H - 6);
+            doc.text(CREDIT, W / 2, H - 6, { align: 'center' });
             doc.text(`Page ${doc.internal.getNumberOfPages()} of ${TP}`, W - 8, H - 6, { align: 'right' });
         },
     });
@@ -458,35 +460,86 @@ function chart(parent, height, config) {
 const COLORS = { good: '#2e7d32', mid: '#e08600', bad: '#c62828', na: '#9e9e9e', brand: '#1a237e', brand2: '#3949ab' };
 const statusColor = s => (s === 'Leading' ? COLORS.good : s === 'Lagging' ? COLORS.bad : COLORS.mid);
 
-function kpi(label, value, delta, o = {}) {
-    const href = o.href ? ` href="${o.href}"` : '';
-    const d = delta == null ? '' : `${deltaHtml(delta, o.pct, o.invert)} <small>vs ${fmtD(state.prev)}</small>`;
-    return `<a class="kpi ${o.cls || ''}"${href}><span class="kpi-label">${label}</span><span class="kpi-val">${o.pct ? fmtP(value) + '%' : fmtN(value)}</span><span class="kpi-delta">${d}</span></a>`;
+const ICONS = {
+    teacher: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    school: '<path d="M3 21h18M5 21V10l7-5 7 5v11M10 21v-5h4v5"/>',
+    full: '<path d="M20 6 9 17l-5-5"/>',
+    part: '<circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/>',
+    zero: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+    up: '<path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
+    down: '<path d="m3 7 6 6 4-4 8 8"/><path d="M14 17h7v-7"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+    flag: '<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>',
+};
+const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+
+function statCard({ label, value, delta, invert, pctDelta, foot, ic, tone, href }) {
+    const d = delta == null ? '' : `<span class="stat-delta">${deltaHtml(delta, pctDelta, invert)} <small>since ${fmtD(state.prev)}</small></span>`;
+    return `<a class="stat ${tone}"${href ? ` href="${href}"` : ''}>
+        <span class="stat-icon">${icon(ic)}</span>
+        <span class="stat-body"><span class="stat-label">${label}</span><span class="stat-val">${value}</span>${d}<span class="stat-foot">${foot}</span></span>
+    </a>`;
 }
 
-// ---------------------------------------------------------------- pages
 function pageDashboard(v) {
     const S = cur(), P = prev(), T = S.total, PT = P && P.total;
     const d = k => (PT ? T[k] - PT[k] : null);
-    pageHead(v, 'Dashboard', subLine(S, P));
+    const ranked = rankedBlocks(S, P);
+    const count = s => ranked.filter(b => b.status === s).length;
+    pageHead(v, 'District Dashboard', subLine(S, P));
 
-    v.append(h(`<div class="kpis">
-        ${kpi('Schools', T.schools, d('schools'), { href: '#/schools' })}
-        ${kpi('Total Teachers', T.t, d('t'))}
-        ${kpi('Teachers Onboarded', T.o, d('o'), { cls: 'good' })}
-        ${kpi('Onboarded %', T.p, d('p'), { pct: true, cls: pctCls(T.p) })}
-        ${kpi('Pending Teachers', T.pend, d('pend'), { invert: true, cls: 'bad' })}
-        ${kpi('100% Schools', T.full, d('full'), { href: '#/schools/full', cls: 'good' })}
-        ${kpi('1-99% Schools', T.part, d('part'), { href: '#/schools/part', cls: 'mid' })}
-        ${kpi('0% Schools', T.zero, d('zero'), { href: '#/schools/zero', invert: true, cls: 'bad' })}
+    // hero: district progress
+    const chg = PT ? `<span class="hero-chip ${T.p >= PT.p ? 'pos' : 'neg'}">${icon(T.p >= PT.p ? 'up' : 'down')} ${signed(T.p - PT.p, true)} pt &middot; ${signed(T.o - PT.o)} teachers since ${fmtD(P.date)}</span>` : '';
+    v.append(h(`<section class="hero">
+        <div class="ring" style="--p:${Math.min(100, T.p)}"><div class="ring-in"><b>${fmtP(T.p)}%</b><small>onboarded</small></div></div>
+        <div class="hero-main">
+            <div class="hero-label">District teacher onboarding &middot; Purba Bardhaman</div>
+            <div class="hero-title"><b>${fmtN(T.o)}</b> of ${fmtN(T.t)} teachers onboarded</div>
+            <div class="hero-bar"><span style="width:${Math.min(100, T.p)}%"></span></div>
+            <div class="hero-meta">${fmtN(T.pend)} teachers still to be onboarded across ${fmtN(T.schools)} schools</div>
+            ${chg}
+        </div>
+        <div class="hero-stats">
+            <div><b>${S.blocks.length}</b><span>Blocks</span></div>
+            <div><b>${fmtN(T.schools)}</b><span>Schools</span></div>
+            <div><b class="g">${count('Leading')}</b><span>Leading blocks</span></div>
+            <div><b class="r">${count('Lagging')}</b><span>Lagging blocks</span></div>
+        </div>
+    </section>`));
+
+    // teacher KPIs
+    v.append(h(`<div class="stat-grid">
+        ${statCard({ label: 'Total Teachers', value: fmtN(T.t), delta: d('t'), foot: `in ${fmtN(T.schools)} schools`, ic: 'teacher', tone: 'blue' })}
+        ${statCard({ label: 'Teachers Onboarded', value: fmtN(T.o), delta: d('o'), foot: `${fmtP(T.p)}% of all teachers`, ic: 'check', tone: 'green' })}
+        ${statCard({ label: 'Pending Teachers', value: fmtN(T.pend), delta: d('pend'), invert: true, foot: `${fmtP(100 - T.p)}% yet to onboard`, ic: 'clock', tone: 'red' })}
+        ${statCard({ label: 'Onboarded %', value: fmtP(T.p) + '%', delta: d('p'), pctDelta: true, foot: `best block ${fmtP(ranked[0].p)}%`, ic: 'up', tone: 'indigo' })}
     </div>`));
 
-    const ranked = rankedBlocks(S, P);
+    // school categories
+    const catCard = (key, label, ic, invert) => {
+        const n = T[key], share = pct(n, T.schools);
+        const dd = d(key);
+        return `<a class="cat-card ${key}" href="#/schools/${key}">
+            <div class="cat-top"><span class="cat-icon">${icon(ic)}</span><span class="cat-label">${label}</span><span class="cat-link">View list &rsaquo;</span></div>
+            <div class="cat-val">${fmtN(n)} <small>schools</small></div>
+            <div class="cat-bar"><span style="width:${share}%"></span></div>
+            <div class="cat-foot"><span>${fmtP(share)}% of schools</span>${dd == null ? '' : deltaHtml(dd, false, invert)}</div>
+        </a>`;
+    };
+    v.append(h(`<div class="cat-grid">
+        ${catCard('full', '100% Onboarded Schools', 'full')}
+        ${catCard('part', 'Partially Onboarded (1-99%)', 'part')}
+        ${catCard('zero', '0% Onboarded Schools', 'zero', true)}
+    </div>`));
+
+    // key highlights
     const best = ranked[0], worst = ranked[ranked.length - 1];
     const notes = [
-        `District onboarding is <b>${fmtP(T.p)}%</b> (${fmtN(T.o)} of ${fmtN(T.t)} teachers)${PT ? `, ${deltaHtml(T.p - PT.p, true)} percentage points since ${fmtD(P.date)} (${signed(T.o - PT.o)} teachers)` : ''}.`,
-        `Best block: <b>${esc(best.block)}</b> (${fmtP(best.p)}%). Lowest block: <b>${esc(worst.block)}</b> (${fmtP(worst.p)}%).`,
-        `<b>${fmtN(T.zero)}</b> schools (${fmtP(pct(T.zero, T.schools))}%) still have no teacher onboarded; <b>${fmtN(T.full)}</b> schools are fully onboarded.`,
+        ['up', `Highest onboarding: <b>${esc(best.block)}</b> at ${fmtP(best.p)}%; lowest: <b>${esc(worst.block)}</b> at ${fmtP(worst.p)}%.`],
+        ['zero', `<b>${fmtN(T.zero)}</b> schools (${fmtP(pct(T.zero, T.schools))}%) have not onboarded any teacher. <a href="#/schools/zero">See list &rsaquo;</a>`],
+        ['flag', `Most pending teachers: <b>${esc([...ranked].sort((a, b) => b.pend - a.pend)[0].block)}</b> (${fmtN([...ranked].sort((a, b) => b.pend - a.pend)[0].pend)} pending).`],
     ];
     if (P) {
         const sr = schoolRows(S, P);
@@ -495,57 +548,56 @@ function pageDashboard(v) {
         const improved = sr.filter(x => x.dO > 0).length;
         const regressed = sr.filter(x => x.dO < 0).length;
         const still = ranked.filter(b => b.dO === 0).map(b => b.block);
-        notes.push(`Since ${fmtD(P.date)}: <b>${improved}</b> schools improved, <b>${newFull}</b> became 100%, <b>${outZero}</b> moved out of 0%${regressed ? `, <span class="down">${regressed} show fewer onboarded teachers</span>` : ''}. <a href="#/compare">Details &rsaquo;</a>`);
-        if (still.length) notes.push(`No progress since ${fmtD(P.date)} in ${still.length} block(s): ${still.map(esc).join(', ')}.`);
+        const gainer = [...ranked].sort((a, b) => (b.dO || 0) - (a.dO || 0))[0];
+        notes.unshift(['check', `Since ${fmtD(P.date)}: <b>${fmtN(improved)}</b> schools improved, <b>${fmtN(newFull)}</b> became 100% and <b>${fmtN(outZero)}</b> moved out of 0%. <a href="#/compare">Details &rsaquo;</a>`]);
+        if (gainer && gainer.dO > 0) notes.push(['up', `Top gainer since ${fmtD(P.date)}: <b>${esc(gainer.block)}</b> (${signed(gainer.dO)} teachers).`]);
+        if (still.length) notes.push(['info', `No progress since ${fmtD(P.date)} in ${still.length} block(s): ${still.map(esc).join(', ')}.`]);
+        if (regressed) notes.push(['down', `<span class="down">${fmtN(regressed)} school(s) show fewer onboarded teachers than on ${fmtD(P.date)}</span> &mdash; please verify.`]);
     }
-    v.append(h(`<div class="insight"><ul>${notes.map(n => `<li>${n}</li>`).join('')}</ul></div>`));
+    card(v, 'Key Highlights').append(h(`<ul class="highlights">${notes.map(([i, t]) => `<li><span class="hl-icon">${icon(i)}</span><span>${t}</span></li>`).join('')}</ul>`));
 
+    // charts
     const g = h('<div class="grid-2"></div>');
     v.append(g);
-    chart(card(g, 'Block-wise Onboarded % (ranked)'), Math.max(320, ranked.length * 20 + 40), {
-        type: 'bar',
-        data: {
-            labels: ranked.map(b => b.block),
-            datasets: [{ label: 'Onboarded %', data: ranked.map(b => round2(b.p)), backgroundColor: ranked.map(b => statusColor(b.status)), borderRadius: 3 }],
-        },
-        options: {
-            indexAxis: 'y',
-            plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw}%  (${fmtN(ranked[c.dataIndex].o)} / ${fmtN(ranked[c.dataIndex].t)})` } } },
-            scales: { x: { min: 0, max: 100, ticks: { callback: x => x + '%' } }, y: { ticks: { autoSkip: false, font: { size: 10 } } } },
-            onClick: (e, els) => { if (els.length) location.hash = '#/schools?block=' + encodeURIComponent(ranked[els[0].index].block); },
-        },
-    });
-
-    const right = h('<div class="stack" style="margin:0"></div>');
-    g.append(right);
-    chart(card(right, 'Schools by onboarding category'), 240, {
+    chart(card(g, 'Schools by Onboarding Category'), 260, {
         type: 'doughnut',
         data: {
             labels: ['100%', '1-99%', '0%', 'No teachers'],
-            datasets: [{ data: [T.full, T.part, T.zero, T.na], backgroundColor: [COLORS.good, COLORS.mid, COLORS.bad, COLORS.na] }],
+            datasets: [{ data: [T.full, T.part, T.zero, T.na], backgroundColor: [COLORS.good, COLORS.mid, COLORS.bad, COLORS.na], borderWidth: 2, borderColor: '#fff' }],
         },
-        options: { plugins: { legend: { position: 'right' } }, cutout: '60%' },
+        options: { plugins: { legend: { position: window.innerWidth < 600 ? 'bottom' : 'right', labels: { usePointStyle: true, padding: 14 } } }, cutout: '64%' },
+    });
+    const bands = [['Below 40%', 0, 40], ['40-60%', 40, 60], ['60-80%', 60, 80], ['80% and above', 80, 101]];
+    chart(card(g, 'Blocks by Onboarding Level'), 260, {
+        type: 'bar',
+        data: {
+            labels: bands.map(b => b[0]),
+            datasets: [{ label: 'Blocks', data: bands.map(([, lo, hi]) => ranked.filter(b => b.p >= lo && b.p < hi).length), backgroundColor: [COLORS.bad, COLORS.mid, COLORS.brand2, COLORS.good], borderRadius: 6, maxBarThickness: 56 }],
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: 'Number of blocks' } }, x: { grid: { display: false } } } },
     });
     if (state.snaps.length > 1) {
         const all = state.snaps.map(s => enrich(s));
-        chart(card(right, 'District daily trend'), 240, {
+        chart(card(v, 'District Daily Trend'), 280, {
             type: 'line',
             data: {
-                labels: all.map(s => fmtD(s.date).slice(0, 5)),
+                labels: all.map(s => fmtD(s.date)),
                 datasets: [
-                    { label: 'Onboarded %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: 'rgba(26,35,126,.12)', fill: true, tension: .25, yAxisID: 'y' },
-                    { label: '0% schools', data: all.map(s => s.total.zero), borderColor: COLORS.bad, tension: .25, yAxisID: 'y1' },
+                    { label: 'Onboarded %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: 'rgba(26,35,126,.10)', fill: true, tension: .3, yAxisID: 'y', pointRadius: 3 },
+                    { label: '0% schools', data: all.map(s => s.total.zero), borderColor: COLORS.bad, tension: .3, yAxisID: 'y1', pointRadius: 3 },
+                    { label: '100% schools', data: all.map(s => s.total.full), borderColor: COLORS.good, tension: .3, yAxisID: 'y1', pointRadius: 3 },
                 ],
             },
-            options: { interaction: { mode: 'index', intersect: false }, scales: { y: { ticks: { callback: x => x + '%' } }, y1: { position: 'right', grid: { drawOnChartArea: false } } } },
+            options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { usePointStyle: true } } }, scales: { y: { ticks: { callback: x => x + '%' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Schools' } } } },
         });
     }
 
     const g2 = h('<div class="grid-2" style="margin-top:16px"></div>');
     v.append(g2);
     const mini = [C.rank, C.block, C.o, C.p, col(C.dO, { h: 'Change' })];
-    tableCard(g2, 'Top 5 Leading Blocks', { cols: mini, rows: ranked.slice(0, 5), onRow: r => { location.hash = '#/schools?block=' + encodeURIComponent(r.block); } }, plainSub(S, P));
-    tableCard(g2, 'Bottom 5 Lagging Blocks', { cols: mini, rows: ranked.slice(-5).reverse(), onRow: r => { location.hash = '#/schools?block=' + encodeURIComponent(r.block); } }, plainSub(S, P));
+    const go = r => { location.hash = '#/schools?block=' + encodeURIComponent(r.block); };
+    tableCard(g2, 'Top 5 Leading Blocks', { cols: mini, rows: ranked.slice(0, 5), onRow: go }, plainSub(S, P));
+    tableCard(g2, 'Bottom 5 Lagging Blocks', { cols: mini, rows: ranked.slice(-5).reverse(), onRow: go }, plainSub(S, P));
 }
 
 function pageBlocks(v) {
@@ -784,14 +836,24 @@ function pageData(v) {
     pageHead(v, 'Upload / Manage Data', 'Upload the combined Excel file every day. One file is kept per date.');
 
     const up = card(v, 'Upload daily Excel');
-    up.append(h(`<div>
-        <label class="drop" id="drop"><input type="file" id="file" accept=".xlsx,.xls,.csv" multiple hidden>
-            <strong>Tap to choose or drop the Excel file(s) here</strong>
-            <span class="help">e.g. <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> &mdash; several days can be uploaded at once</span>
+    up.append(h(`<div class="upload">
+        <label class="drop" id="drop">
+            <input type="file" id="file" accept=".xlsx,.xls,.csv" multiple hidden>
+            <span class="drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></span>
+            <strong>Drag &amp; drop the Excel file(s) here</strong>
+            <span class="help">or</span>
+            <span class="btn primary">Browse files</span>
+            <span class="help drop-note">.xlsx &middot; e.g. <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> &middot; several days can be uploaded together</span>
         </label>
-        <div class="form-row">
-            <div class="filters" style="margin:0"><label>Data date (optional)<input type="date" id="upDate"></label></div>
-            <p class="help" style="margin:0;flex:1;min-width:220px">The date is read from the file name (YYYY-MM-DD or DD-MM-YYYY). Pick a date here only when uploading a single file without a date in its name, or to override it.</p>
+        <div class="upload-opts">
+            <div class="field">
+                <label for="upDate">Data date <em>(optional)</em></label>
+                <input type="date" id="upDate">
+            </div>
+            <div class="upload-hint">
+                <span class="hl-icon">${icon('info')}</span>
+                <p>The date is read automatically from the file name (<code>YYYY-MM-DD</code> or <code>DD-MM-YYYY</code>). Set a date here only when uploading a single file whose name has no date, or to override it.</p>
+            </div>
         </div>
     </div>`));
     const drop = $('#drop', up), file = $('#file', up);
@@ -856,7 +918,8 @@ function pageData(v) {
 function emptyState() {
     return h(`<div class="card empty-state"><h2>No data yet</h2>
         <p>Upload the combined school-wise Excel file (the one with the <b>Block Name</b> column) to start monitoring.</p>
-        <p><a class="btn primary" href="#/data">&#11014; Upload Excel</a></p></div>`);
+        <p><a class="btn primary" href="#/data">&#11014; Upload Excel</a></p>
+        <p class="help">${CREDIT}</p></div>`);
 }
 
 // ---------------------------------------------------------------- upload handling
@@ -967,7 +1030,8 @@ async function init() {
         $('#view').innerHTML = '<div class="card"><div class="card-body">Could not load required libraries. Please check the internet connection and reload.</div></div>';
         return;
     }
-    $('#menuBtn').onclick = () => document.body.classList.toggle('menu-open');
+    $('#year').textContent = new Date().getFullYear();
+    $('#menuBtn').onclick =() => document.body.classList.toggle('menu-open');
     $('#backdrop').onclick = () => document.body.classList.remove('menu-open');
     $('#curDate').onchange = e => { setCur(e.target.value); fillDateSelects(); render(); };
     $('#prevDate').onchange = e => { state.prev = e.target.value; render(); };

@@ -12,8 +12,11 @@
 <header class="topbar">
     <button id="menuBtn" class="icon-btn" aria-label="Open menu">&#9776;</button>
     <div class="brand">
-        <strong>Prashast On boarding status</strong>
-        <span>SSM, Purba Bardhaman</span>
+        <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 23V13M14 23V9M20 23v-6M26 23V15" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" fill="none"/></svg></span>
+        <span class="brand-text">
+            <strong>Prashast On boarding status <em>:: SSM, Purba Bardhaman</em></strong>
+            <span class="tagline">An in-house production of SSM, Purba Bardhaman</span>
+        </span>
     </div>
     <div class="date-pick">
         <label>Data of <select id="curDate"></select></label>
@@ -39,10 +42,19 @@
             <div class="nav-group">Data</div>
             <a href="#/data" data-route="data">&#11014; Upload / Manage Data</a>
         </nav>
-        <p class="side-foot">Source: PRASHAST portal &mdash; Teacher Onboarding, School Wise Report</p>
+        <div class="side-foot">
+            <span class="side-credit">An in-house production of<br><b>SSM, Purba Bardhaman</b></span>
+            <span>Source: PRASHAST portal &mdash; Teacher Onboarding, School Wise Report</span>
+        </div>
     </aside>
     <div id="backdrop"></div>
-    <main id="view"><div class="loading">Loading&hellip;</div></main>
+    <main>
+        <div id="view"><div class="loading">Loading&hellip;</div></div>
+        <footer class="app-foot">
+            <span>&copy; <span id="year"></span> SSM, Purba Bardhaman &middot; Prashast On boarding status</span>
+            <span>An in-house production of SSM, Purba Bardhaman</span>
+        </footer>
+    </main>
 </div>
 <div id="toast"></div>
 
