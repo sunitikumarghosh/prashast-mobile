@@ -1,14 +1,16 @@
 /**
  * Prashast Mobile PWA - Service Worker (Offline Cache)
  */
-const CACHE_NAME = 'prashast-mobile-v1';
+const CACHE_NAME = 'prashast-mobile-v2';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
     './manifest.json',
     'https://cdn.tailwindcss.com',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
-    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
+    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'
 ];
 
 self.addEventListener('install', (event) => {

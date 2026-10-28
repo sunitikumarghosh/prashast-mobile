@@ -3,19 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Prashast Mobile Monitoring</title>
+    <title>Prashast Mobile Monitoring & Analytics</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1e3a8a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231e3a8a'/><text y='65' x='50' font-size='50' text-anchor='middle'>📊</text></svg>">
+    
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
+                    screens: {
+                        'xs': '420px',
+                    },
                     colors: {
                         brand: {
                             50: '#eff6ff',
@@ -24,7 +28,8 @@
                             600: '#2563eb',
                             700: '#1d4ed8',
                             800: '#1e40af',
-                            900: '#1e3a8a'
+                            900: '#1e3a8a',
+                            950: '#0f172a'
                         }
                     }
                 }
@@ -35,111 +40,143 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <!-- SheetJS CDN -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- jsPDF & AutoTable CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
     <style>
-        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        /* Smooth touch scrolling & hidden scrollbars for clean mobile appearance */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .custom-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
         .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Tap highlights & smooth touch physics */
+        button, a, select, input { -webkit-tap-highlight-color: transparent; }
+        
+        /* Sticky header backdrop filter */
+        .header-glass {
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col font-sans antialiased selection:bg-blue-600 selection:text-white">
 
-    <!-- Top Navigation Header -->
-    <header class="bg-gradient-to-r from-blue-900 via-blue-800 to-indigo-900 text-white shadow-lg sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <!-- Brand Title -->
-                <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center text-xl shadow-inner">
-                        📊
-                    </div>
-                    <div>
-                        <div class="flex items-center space-x-2">
-                            <h1 class="text-lg font-bold tracking-tight">PRASHAST MONITORING SYSTEM</h1>
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 font-medium">District Portal</span>
+    <!-- Top Navigation Header (Fully Responsive on All Mobile & Desktop Screens) -->
+    <header class="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white shadow-lg sticky top-0 z-40 header-glass">
+        <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+            <!-- Top Bar: Brand, District, Date & Actions -->
+            <div class="py-2.5 sm:py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b border-white/10">
+                <!-- Left: Logo & Portal Title -->
+                <div class="flex items-center justify-between min-w-0">
+                    <div class="flex items-center space-x-2.5 min-w-0">
+                        <div class="w-9 h-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-lg shadow-inner flex-shrink-0">
+                            📊
                         </div>
-                        <p class="text-xs text-blue-200" id="headerSubtitle">Purba Bardhaman &bull; Teacher Onboarding Analytics</p>
+                        <div class="min-w-0">
+                            <div class="flex items-center space-x-1.5">
+                                <h1 class="text-base sm:text-lg font-black tracking-tight truncate">PRASHAST MONITOR</h1>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 font-semibold whitespace-nowrap">District</span>
+                            </div>
+                            <p class="text-[11px] text-blue-200/90 truncate">Purba Bardhaman &bull; Teacher Onboarding Analytics</p>
+                        </div>
                     </div>
+
+                    <!-- Mobile Import Button (Visible on smallest screens) -->
+                    <button onclick="openUploadModal()" class="sm:hidden inline-flex items-center px-2.5 py-1.5 rounded-lg bg-emerald-600 active:scale-95 text-white text-xs font-bold shadow-md transition space-x-1 flex-shrink-0 cursor-pointer">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        <span>Import</span>
+                    </button>
                 </div>
 
-                <!-- Right Actions: Date Selector & Upload Button -->
-                <div class="flex items-center space-x-3">
-                    <!-- Date Selector -->
-                    <div class="flex items-center bg-white/10 backdrop-blur border border-white/20 rounded-lg px-2.5 py-1 text-sm">
-                        <span class="text-blue-200 text-xs mr-2 font-medium">Report Date:</span>
-                        <select id="dateSelect" class="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs">
+                <!-- Right: Date Selector & Desktop Import Button -->
+                <div class="flex items-center justify-between sm:justify-end space-x-2 flex-shrink-0">
+                    <!-- Date Selector Pill -->
+                    <div class="flex-1 sm:flex-initial flex items-center bg-white/10 border border-white/20 rounded-xl px-2.5 py-1.5 text-xs shadow-inner">
+                        <span class="text-blue-200 text-xs mr-1.5 font-medium whitespace-nowrap">Report Date:</span>
+                        <select id="dateSelect" class="bg-transparent text-white font-bold focus:outline-none cursor-pointer text-xs w-full sm:w-auto">
                             <option value="" class="text-slate-800">Loading dates...</option>
                         </select>
                     </div>
 
-                    <!-- Upload Excel Button -->
-                    <button id="btnOpenUpload" class="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md hover:shadow-lg transition-all space-x-1.5 cursor-pointer">
+                    <!-- Desktop Import Button -->
+                    <button onclick="openUploadModal()" class="hidden sm:inline-flex items-center px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-md hover:shadow-lg transition space-x-1.5 cursor-pointer flex-shrink-0">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                         <span>Import Daily Excel</span>
                     </button>
                 </div>
             </div>
 
-            <!-- Tab Navigation Bar -->
-            <nav class="flex space-x-1 overflow-x-auto custom-scroll border-t border-white/10 py-1 text-xs font-medium">
-                <button class="nav-tab active px-3 py-2 rounded-md transition text-white bg-white/15 font-semibold" data-tab="overview">
-                    📈 Overview & KPIs
+            <!-- Horizontal Scrollable Pill Navigation (Zero Text Wrapping & Smooth Touch Pan) -->
+            <nav class="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-2 -mx-3 px-3 sm:mx-0 sm:px-0">
+                <button class="nav-tab active inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-bold transition text-white bg-white/20 shadow-sm" data-tab="overview">
+                    <span>📈</span>
+                    <span>Overview & KPIs</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-blue-200 hover:text-white hover:bg-white/10" data-tab="blocks">
-                    🏢 Block Wise Report
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium text-blue-200 hover:text-white hover:bg-white/10 transition" data-tab="blocks">
+                    <span>🏢</span>
+                    <span>Block Wise Report</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-blue-200 hover:text-white hover:bg-white/10" data-tab="comparison">
-                    🔄 Day-Wise Comparison
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium text-blue-200 hover:text-white hover:bg-white/10 transition" data-tab="comparison">
+                    <span>🔄</span>
+                    <span>Day Comparison</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-red-200 hover:text-white hover:bg-white/10 flex items-center space-x-1.5" data-tab="zero">
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium text-red-200 hover:text-white hover:bg-white/10 transition" data-tab="zero">
                     <span class="w-2 h-2 rounded-full bg-red-400"></span>
                     <span>Not Onboarded (0%)</span>
-                    <span id="badgeZeroCount" class="ml-1 px-1.5 py-0.2 bg-red-500/40 rounded-full text-[10px]">0</span>
+                    <span id="badgeZeroCount" class="inline-flex items-center justify-center ml-1 px-1.5 py-0.2 bg-red-500/40 rounded-full text-[10px] font-bold">0</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-amber-200 hover:text-white hover:bg-white/10 flex items-center space-x-1.5" data-tab="pending">
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium text-amber-200 hover:text-white hover:bg-white/10 transition" data-tab="pending">
                     <span class="w-2 h-2 rounded-full bg-amber-400"></span>
                     <span>Pending (1-99%)</span>
-                    <span id="badgePendingCount" class="ml-1 px-1.5 py-0.2 bg-amber-500/40 rounded-full text-[10px]">0</span>
+                    <span id="badgePendingCount" class="inline-flex items-center justify-center ml-1 px-1.5 py-0.2 bg-amber-500/40 rounded-full text-[10px] font-bold">0</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-emerald-200 hover:text-white hover:bg-white/10 flex items-center space-x-1.5" data-tab="completed">
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium text-emerald-200 hover:text-white hover:bg-white/10 transition" data-tab="completed">
                     <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>100% Onboarded</span>
-                    <span id="badgeCompletedCount" class="ml-1 px-1.5 py-0.2 bg-emerald-500/40 rounded-full text-[10px]">0</span>
+                    <span id="badgeCompletedCount" class="inline-flex items-center justify-center ml-1 px-1.5 py-0.2 bg-emerald-500/40 rounded-full text-[10px] font-bold">0</span>
                 </button>
-                <button class="nav-tab px-3 py-2 rounded-md transition text-blue-200 hover:text-white hover:bg-white/10" data-tab="schools">
-                    🏫 All Schools Directory
+                <button class="nav-tab inline-flex items-center space-x-1.5 whitespace-nowrap flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium text-blue-200 hover:text-white hover:bg-white/10 transition" data-tab="schools">
+                    <span>🏫</span>
+                    <span>All Schools Directory</span>
                 </button>
             </nav>
         </div>
     </header>
 
-    <!-- PWA Mobile Install Banner (Visible on mobile browsers if installable) -->
-    <div id="pwaInstallBanner" class="hidden bg-gradient-to-r from-blue-700 to-indigo-800 text-white px-4 py-2.5 shadow-md flex items-center justify-between z-30">
-        <div class="flex items-center space-x-2 text-xs">
-            <span class="text-lg">📱</span>
-            <div>
-                <p class="font-bold">Install Prashast Mobile App</p>
-                <p class="text-[11px] text-blue-200">Run as full-screen offline app on your Android phone</p>
+    <!-- PWA Mobile Install Banner (Clean & Non-Intrusive) -->
+    <div id="pwaInstallBanner" class="hidden bg-gradient-to-r from-blue-700 to-indigo-800 text-white px-3 sm:px-6 py-2 shadow-sm flex items-center justify-between z-30">
+        <div class="flex items-center space-x-2 text-xs min-w-0">
+            <span class="text-base flex-shrink-0">📱</span>
+            <div class="truncate">
+                <span class="font-bold">Install Prashast App:</span>
+                <span class="text-blue-200 text-[11px] ml-1">Run full-screen offline on mobile</span>
             </div>
         </div>
-        <button onclick="installPWA()" class="px-3 py-1 bg-white text-blue-900 rounded-lg text-xs font-bold shadow hover:bg-blue-50 transition cursor-pointer">
-            Install
-        </button>
+        <div class="flex items-center space-x-2 flex-shrink-0">
+            <button onclick="installPWA()" class="px-2.5 py-1 bg-white text-blue-900 rounded-lg text-xs font-bold shadow hover:bg-blue-50 transition cursor-pointer">
+                Install
+            </button>
+            <button onclick="document.getElementById('pwaInstallBanner').remove()" class="text-blue-200 hover:text-white text-sm px-1">&times;</button>
+        </div>
     </div>
 
     <!-- Main Container -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
 
         <!-- Initial Blank State / No Data Notification -->
-        <div id="noDataBanner" class="hidden bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm mb-6">
+        <div id="noDataBanner" class="hidden bg-white border border-slate-200 rounded-2xl p-6 sm:p-10 text-center shadow-sm mb-6">
             <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto text-3xl mb-4 shadow-inner">
                 📥
             </div>
-            <h2 class="text-xl font-bold text-slate-800 mb-2">No Prashast Reports Imported Yet</h2>
-            <p class="text-sm text-slate-500 max-w-md mx-auto mb-6">
-                Import your downloaded Excel file (<code class="bg-slate-100 text-blue-600 px-2 py-0.5 rounded text-xs">Teacher_Onboarding_All_Blocks_Consolidated_*.xlsx</code>) to start monitoring block & school progress.
+            <h2 class="text-lg sm:text-xl font-bold text-slate-800 mb-2">No Prashast Reports Imported Yet</h2>
+            <p class="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mb-6">
+                Import your downloaded daily consolidated Excel file (<code class="bg-slate-100 text-blue-600 px-1.5 py-0.5 rounded text-[11px]">Teacher_Onboarding_All_Blocks_Consolidated_DD-MM-YYYY.xlsx</code>) to start monitoring block & school progress.
             </p>
-            <button onclick="document.getElementById('fileInput').click()" class="inline-flex items-center px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md transition cursor-pointer">
+            <button onclick="openUploadModal()" class="inline-flex items-center px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-md transition cursor-pointer">
                 <span>Select & Import Excel</span>
             </button>
         </div>
@@ -147,23 +184,37 @@
         <!-- ==========================================================================
              TAB 1: OVERVIEW & KEY PERFORMANCE INDICATORS
              ========================================================================== -->
-        <section id="tab-overview" class="tab-pane space-y-6">
-            <!-- 4 Top KPI Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <section id="tab-overview" class="tab-pane space-y-4 sm:space-y-6">
+            <!-- Executive Actions & Download Toolbar -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-slate-900">Executive District Overview</h2>
+                    <p class="text-xs text-slate-400">Purba Bardhaman &bull; Teacher Onboarding Analytics</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportExecutiveOverviewPDF()" class="w-full sm:w-auto px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md transition inline-flex items-center justify-center space-x-1.5 cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <span>📄 Download Executive PDF</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 4 Top KPI Cards (Responsive Grid) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <!-- Total Teachers & Onboarded -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm relative overflow-hidden">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm relative overflow-hidden">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Teachers Onboarded</p>
-                            <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpiTeachersOnboarded">0</h3>
-                            <p class="text-xs text-slate-500 mt-1">out of <span id="kpiTotalTeachers" class="font-semibold text-slate-700">0</span> total</p>
+                            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Teachers Onboarded</p>
+                            <h3 class="text-2xl sm:text-3xl font-black text-slate-900 mt-1" id="kpiTeachersOnboarded">0</h3>
+                            <p class="text-xs text-slate-500 mt-1">out of <span id="kpiTotalTeachers" class="font-bold text-slate-700">0</span> total</p>
                         </div>
-                        <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold">
+                        <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold flex-shrink-0">
                             👨‍🏫
                         </div>
                     </div>
                     <div class="mt-4">
-                        <div class="flex items-center justify-between text-xs font-semibold mb-1">
+                        <div class="flex items-center justify-between text-xs font-bold mb-1">
                             <span class="text-blue-600" id="kpiOnboardedPct">0%</span>
                             <span class="text-slate-400">District Average</span>
                         </div>
@@ -174,14 +225,14 @@
                 </div>
 
                 <!-- Fully Onboarded Schools (100%) -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wider">100% Completed Schools</p>
-                            <h3 class="text-2xl font-black text-emerald-600 mt-1" id="kpiCompletedSchools">0</h3>
-                            <p class="text-xs text-slate-500 mt-1"><span id="kpiCompletedSchoolsPct" class="font-semibold text-emerald-600">0%</span> of all schools</p>
+                            <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">100% Completed Schools</p>
+                            <h3 class="text-2xl sm:text-3xl font-black text-emerald-600 mt-1" id="kpiCompletedSchools">0</h3>
+                            <p class="text-xs text-slate-500 mt-1"><span id="kpiCompletedSchoolsPct" class="font-bold text-emerald-600">0%</span> of all schools</p>
                         </div>
-                        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+                        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl flex-shrink-0">
                             ✅
                         </div>
                     </div>
@@ -192,78 +243,78 @@
                 </div>
 
                 <!-- Not Onboarded Schools (0%) -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-red-600 uppercase tracking-wider">Not Started (0%)</p>
-                            <h3 class="text-2xl font-black text-red-600 mt-1" id="kpiZeroSchools">0</h3>
-                            <p class="text-xs text-slate-500 mt-1"><span id="kpiZeroSchoolsPct" class="font-semibold text-red-600">0%</span> critical attention</p>
+                            <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider">Not Started (0%)</p>
+                            <h3 class="text-2xl sm:text-3xl font-black text-red-600 mt-1" id="kpiZeroSchools">0</h3>
+                            <p class="text-xs text-slate-500 mt-1"><span id="kpiZeroSchoolsPct" class="font-bold text-red-600">0%</span> critical attention</p>
                         </div>
-                        <div class="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center text-xl">
+                        <div class="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center text-xl flex-shrink-0">
                             ⚠️
                         </div>
                     </div>
                     <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                         <span>Urgent Action Needed</span>
-                        <button onclick="switchTab('zero')" class="text-xs text-red-600 font-semibold hover:underline cursor-pointer">View List &rarr;</button>
+                        <button onclick="switchTab('zero')" class="text-xs text-red-600 font-bold hover:underline cursor-pointer">View List &rarr;</button>
                     </div>
                 </div>
 
                 <!-- Total Blocks & Pending -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-xs font-semibold text-amber-600 uppercase tracking-wider">In Progress Schools</p>
-                            <h3 class="text-2xl font-black text-amber-600 mt-1" id="kpiPendingSchools">0</h3>
-                            <p class="text-xs text-slate-500 mt-1"><span id="kpiPendingTeachers" class="font-semibold text-amber-700">0</span> teachers remaining</p>
+                            <p class="text-[11px] font-bold text-amber-600 uppercase tracking-wider">In Progress Schools</p>
+                            <h3 class="text-2xl sm:text-3xl font-black text-amber-600 mt-1" id="kpiPendingSchools">0</h3>
+                            <p class="text-xs text-slate-500 mt-1"><span id="kpiPendingTeachers" class="font-bold text-amber-700">0</span> teachers remaining</p>
                         </div>
-                        <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+                        <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl flex-shrink-0">
                             ⏳
                         </div>
                     </div>
                     <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                        <span>Total Blocks in District</span>
+                        <span>District Coverage</span>
                         <span id="kpiTotalBlocks" class="font-bold text-slate-800">0 Blocks</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Visual Charts & Analytics Row -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Chart 1: Status Distribution Doughnut -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+            <!-- Visual Charts Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+                <!-- Status Distribution Doughnut -->
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <h3 class="text-sm font-bold text-slate-900 mb-1">School Onboarding Breakdown</h3>
                     <p class="text-xs text-slate-400 mb-4">Distribution across all schools</p>
-                    <div class="h-56 relative flex items-center justify-center">
+                    <div class="h-52 relative flex items-center justify-center">
                         <canvas id="chartStatusDoughnut"></canvas>
                     </div>
                 </div>
 
-                <!-- Chart 2: Historical Day-over-Day Trendline -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm lg:col-span-2">
+                <!-- Historical Day-over-Day Trendline -->
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm lg:col-span-2">
                     <div class="flex items-center justify-between mb-2">
                         <div>
-                            <h3 class="text-sm font-bold text-slate-900">District Onboarding Progress Trend</h3>
-                            <p class="text-xs text-slate-400">Day-over-day completion % trajectory</p>
+                            <h3 class="text-sm font-bold text-slate-900">District Progress Trajectory</h3>
+                            <p class="text-xs text-slate-400">Day-over-day completion % trendline</p>
                         </div>
-                        <span class="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-100">Daily Trajectory</span>
+                        <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100">Historical</span>
                     </div>
-                    <div class="h-56 relative">
+                    <div class="h-52 relative">
                         <canvas id="chartTrendline"></canvas>
                     </div>
                 </div>
             </div>
 
             <!-- Leading vs Lagging Blocks Showcase -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 <!-- Leading Blocks (Top 5) -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
                         <div class="flex items-center space-x-2">
                             <span class="text-lg">🏆</span>
                             <h3 class="text-sm font-bold text-slate-900">Top 5 Leading Blocks</h3>
                         </div>
-                        <span class="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">High Performers</span>
+                        <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">High Performers</span>
                     </div>
                     <div class="space-y-3" id="leadingBlocksList">
                         <!-- Populated by JS -->
@@ -271,13 +322,13 @@
                 </div>
 
                 <!-- Lagging Blocks (Bottom 5) -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
                         <div class="flex items-center space-x-2">
                             <span class="text-lg">⚠️</span>
                             <h3 class="text-sm font-bold text-slate-900">Top 5 Lagging Blocks</h3>
                         </div>
-                        <span class="text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">Needs Follow-Up</span>
+                        <span class="text-xs font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">Needs Follow-Up</span>
                     </div>
                     <div class="space-y-3" id="laggingBlocksList">
                         <!-- Populated by JS -->
@@ -290,35 +341,40 @@
              TAB 2: BLOCK WISE DETAILED REPORT & RANKING TABLE
              ========================================================================== -->
         <section id="tab-blocks" class="tab-pane hidden space-y-4">
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                     <div>
-                        <h2 class="text-lg font-bold text-slate-900">Block-Wise Onboarding Performance</h2>
+                        <h2 class="text-base sm:text-lg font-bold text-slate-900">Block-Wise Onboarding Performance</h2>
                         <p class="text-xs text-slate-400">Ranked from highest onboarding % to lowest</p>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <input type="text" id="blockSearchInput" placeholder="Filter block name..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-48">
-                        <button onclick="exportBlocksTable()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition inline-flex items-center space-x-1 cursor-pointer">
-                            <span>📥 Export Excel</span>
-                        </button>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="text" id="blockSearchInput" placeholder="Filter block name..." class="px-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-full sm:w-44">
+                        <div class="flex items-center gap-1.5 w-full sm:w-auto">
+                            <button onclick="exportBlocksTable()" class="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition inline-flex items-center justify-center space-x-1 cursor-pointer">
+                                <span>📥 Excel</span>
+                            </button>
+                            <button onclick="exportBlocksPDF()" class="flex-1 sm:flex-initial px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center justify-center space-x-1 cursor-pointer shadow-sm">
+                                <span>📄 PDF</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Table -->
-                <div class="overflow-x-auto custom-scroll mt-4">
-                    <table class="w-full text-left border-collapse text-xs">
+                <!-- Table with Horizontal Pan on Mobile -->
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll mt-3">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
-                                <th class="py-3 px-3">#</th>
-                                <th class="py-3 px-3">Block Name</th>
-                                <th class="py-3 px-3 text-right">Schools</th>
-                                <th class="py-3 px-3 text-right">Total Teachers</th>
-                                <th class="py-3 px-3 text-right">Onboarded</th>
-                                <th class="py-3 px-3 text-right">Pending</th>
-                                <th class="py-3 px-3 text-center" style="min-width: 140px;">Onboarded (%)</th>
-                                <th class="py-3 px-3 text-center text-emerald-600">100% Schools</th>
-                                <th class="py-3 px-3 text-center text-red-600">0% Schools</th>
-                                <th class="py-3 px-3 text-center">Action</th>
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
+                                <th class="py-2.5 px-3">#</th>
+                                <th class="py-2.5 px-3">Block Name</th>
+                                <th class="py-2.5 px-3 text-right">Schools</th>
+                                <th class="py-2.5 px-3 text-right">Total Teachers</th>
+                                <th class="py-2.5 px-3 text-right">Onboarded</th>
+                                <th class="py-2.5 px-3 text-right">Pending</th>
+                                <th class="py-2.5 px-3 text-center" style="min-width: 130px;">Onboarded (%)</th>
+                                <th class="py-2.5 px-3 text-center text-emerald-600">100% Schools</th>
+                                <th class="py-2.5 px-3 text-center text-red-600">0% Schools</th>
+                                <th class="py-2.5 px-3 text-center">Action</th>
                             </tr>
                         </thead>
                         <tbody id="blocksTableBody" class="divide-y divide-slate-100">
@@ -332,46 +388,46 @@
         <!-- ==========================================================================
              TAB 3: DAY-WISE COMPARISON REPORT
              ========================================================================== -->
-        <section id="tab-comparison" class="tab-pane hidden space-y-6">
+        <section id="tab-comparison" class="tab-pane hidden space-y-4 sm:space-y-6">
             <!-- Date Pair Selector Bar -->
-            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-lg font-bold text-slate-900">Day-over-Day Comparison & Growth</h2>
+                    <h2 class="text-base sm:text-lg font-bold text-slate-900">Day-over-Day Comparison & Growth</h2>
                     <p class="text-xs text-slate-400">Track which blocks and schools improved between two snapshot dates</p>
                 </div>
-                <div class="flex items-center space-x-3 text-xs">
-                    <div>
-                        <label class="block text-slate-400 font-semibold mb-1">Base Date (Earlier):</label>
-                        <select id="compareDate1" class="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="flex-1 min-w-[120px]">
+                        <label class="block text-slate-400 font-bold mb-1">Base Date:</label>
+                        <select id="compareDate1" class="w-full border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </select>
                     </div>
-                    <div class="text-slate-400 font-bold self-end pb-2">&rarr;</div>
-                    <div>
-                        <label class="block text-slate-400 font-semibold mb-1">Compare Date (Later):</label>
-                        <select id="compareDate2" class="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div class="text-slate-400 font-bold self-end pb-2 hidden sm:block">&rarr;</div>
+                    <div class="flex-1 min-w-[120px]">
+                        <label class="block text-slate-400 font-bold mb-1">Compare Date:</label>
+                        <select id="compareDate2" class="w-full border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </select>
                     </div>
-                    <button onclick="runComparison()" class="self-end px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow transition cursor-pointer">
+                    <button onclick="runComparison()" class="self-end px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow transition cursor-pointer w-full sm:w-auto mt-1 sm:mt-0">
                         Compare Now
                     </button>
                 </div>
             </div>
 
             <!-- Comparison Metric Delta Cards -->
-            <div id="comparisonMetricsRow" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div id="comparisonMetricsRow" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <!-- Filled dynamically -->
             </div>
 
             <!-- Top Improving Blocks vs Stagnant Blocks -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 <!-- Top Improving Blocks -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
                         <h3 class="text-sm font-bold text-emerald-800 flex items-center space-x-2">
                             <span>🚀</span>
                             <span>Most Improved Blocks</span>
                         </h3>
-                        <span class="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-100">Highest Net Gain</span>
+                        <span class="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-100">Highest Net Gain</span>
                     </div>
                     <div class="space-y-3" id="topImprovingBlocksList">
                         <!-- Filled by JS -->
@@ -379,13 +435,13 @@
                 </div>
 
                 <!-- Newly Completed Schools -->
-                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
                     <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
                         <h3 class="text-sm font-bold text-blue-900 flex items-center space-x-2">
                             <span>🎉</span>
                             <span>Schools That Reached 100%</span>
                         </h3>
-                        <span class="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-semibold border border-blue-100" id="newlyCompletedCount">0 Schools</span>
+                        <span class="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-bold border border-blue-100" id="newlyCompletedCount">0 Schools</span>
                     </div>
                     <div class="max-h-80 overflow-y-auto custom-scroll space-y-2 pr-1" id="newlyCompletedList">
                         <!-- Filled by JS -->
@@ -394,22 +450,27 @@
             </div>
 
             <!-- Full Block Comparison Table -->
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-                <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2 mb-3">
                     <h3 class="text-sm font-bold text-slate-800">Complete Block Growth Breakdown</h3>
-                    <button onclick="exportComparisonTable()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">
-                        📥 Export Comparison Excel
-                    </button>
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="exportComparisonTable()" class="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer">
+                            📥 Excel
+                        </button>
+                        <button onclick="exportComparisonPDF()" class="flex-1 sm:flex-initial px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm">
+                            📄 PDF
+                        </button>
+                    </div>
                 </div>
-                <div class="overflow-x-auto custom-scroll">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                                 <th class="py-2.5 px-3">Block Name</th>
                                 <th class="py-2.5 px-3 text-right">Total Teachers</th>
                                 <th class="py-2.5 px-3 text-right" id="thDate1Onboarded">Date 1</th>
                                 <th class="py-2.5 px-3 text-right" id="thDate2Onboarded">Date 2</th>
-                                <th class="py-2.5 px-3 text-right font-bold text-emerald-600">Net Added</th>
+                                <th class="py-2.5 px-3 text-right font-black text-emerald-600">Net Added</th>
                                 <th class="py-2.5 px-3 text-right" id="thDate1Pct">Date 1 %</th>
                                 <th class="py-2.5 px-3 text-right" id="thDate2Pct">Date 2 %</th>
                                 <th class="py-2.5 px-3 text-right font-bold text-blue-600">Growth %</th>
@@ -429,7 +490,7 @@
         <section id="tab-zero" class="tab-pane hidden space-y-4">
             <div class="bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold text-lg">
+                    <div class="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold text-lg flex-shrink-0">
                         ⚠️
                     </div>
                     <div>
@@ -437,27 +498,31 @@
                         <p class="text-xs text-red-700">None of the teachers have onboarded yet in these schools.</p>
                     </div>
                 </div>
-                <button onclick="exportFilteredSchools('ZERO', 'Not_Onboarded_0_Percent_Schools')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl shadow transition flex items-center space-x-1.5 cursor-pointer">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    <span>Download Official 0% Excel</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportFilteredSchools('ZERO', 'Not_Onboarded_0_Percent_Schools')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📥 Excel</span>
+                    </button>
+                    <button onclick="exportSchoolsPDF('ZERO', 'Not_Onboarded_0_Percent_Schools')" class="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📄 PDF Report</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Schools Table -->
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                    <div class="flex items-center space-x-2">
-                        <select id="zeroBlockFilter" onchange="loadCategorizedSchools('ZERO', 'zeroTableBody')" class="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="zeroBlockFilter" onchange="loadCategorizedSchools('ZERO', 'zeroTableBody')" class="border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none">
                             <option value="ALL">All Blocks</option>
                         </select>
-                        <input type="text" id="zeroSearchInput" onkeyup="loadCategorizedSchools('ZERO', 'zeroTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-56">
+                        <input type="text" id="zeroSearchInput" onkeyup="loadCategorizedSchools('ZERO', 'zeroTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-full sm:w-56">
                     </div>
-                    <span class="text-xs text-slate-500 font-semibold" id="zeroTotalText">Showing 0 schools</span>
+                    <span class="text-xs text-slate-500 font-bold" id="zeroTotalText">Showing 0 schools</span>
                 </div>
-                <div class="overflow-x-auto custom-scroll">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                                 <th class="py-2.5 px-3">#</th>
                                 <th class="py-2.5 px-3">Block</th>
                                 <th class="py-2.5 px-3">School Name</th>
@@ -481,7 +546,7 @@
         <section id="tab-pending" class="tab-pane hidden space-y-4">
             <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg">
+                    <div class="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg flex-shrink-0">
                         ⏳
                     </div>
                     <div>
@@ -489,33 +554,37 @@
                         <p class="text-xs text-amber-700">These schools have started onboarding teachers but have not reached 100%.</p>
                     </div>
                 </div>
-                <button onclick="exportFilteredSchools('PENDING', 'Pending_Onboarding_Schools')" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow transition flex items-center space-x-1.5 cursor-pointer">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    <span>Download Pending Excel</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportFilteredSchools('PENDING', 'Pending_Onboarding_Schools')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📥 Excel</span>
+                    </button>
+                    <button onclick="exportSchoolsPDF('PENDING', 'Pending_Onboarding_Schools')" class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📄 PDF Report</span>
+                    </button>
+                </div>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                    <div class="flex items-center space-x-2">
-                        <select id="pendingBlockFilter" onchange="loadCategorizedSchools('PENDING', 'pendingTableBody')" class="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="pendingBlockFilter" onchange="loadCategorizedSchools('PENDING', 'pendingTableBody')" class="border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none">
                             <option value="ALL">All Blocks</option>
                         </select>
-                        <input type="text" id="pendingSearchInput" onkeyup="loadCategorizedSchools('PENDING', 'pendingTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-56">
+                        <input type="text" id="pendingSearchInput" onkeyup="loadCategorizedSchools('PENDING', 'pendingTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-full sm:w-56">
                     </div>
-                    <span class="text-xs text-slate-500 font-semibold" id="pendingTotalText">Showing 0 schools</span>
+                    <span class="text-xs text-slate-500 font-bold" id="pendingTotalText">Showing 0 schools</span>
                 </div>
-                <div class="overflow-x-auto custom-scroll">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                                 <th class="py-2.5 px-3">#</th>
                                 <th class="py-2.5 px-3">Block</th>
                                 <th class="py-2.5 px-3">School Name</th>
                                 <th class="py-2.5 px-3 font-mono">UDISE Code</th>
                                 <th class="py-2.5 px-3 text-right">Total</th>
                                 <th class="py-2.5 px-3 text-right">Onboarded</th>
-                                <th class="py-2.5 px-3 text-right font-bold text-amber-700">Pending</th>
+                                <th class="py-2.5 px-3 text-right font-black text-amber-700">Pending</th>
                                 <th class="py-2.5 px-3 text-center" style="min-width: 120px;">Progress</th>
                             </tr>
                         </thead>
@@ -533,7 +602,7 @@
         <section id="tab-completed" class="tab-pane hidden space-y-4">
             <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-lg">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-lg flex-shrink-0">
                         🌟
                     </div>
                     <div>
@@ -541,26 +610,30 @@
                         <p class="text-xs text-emerald-700">All registered teachers in these schools are completely onboarded.</p>
                     </div>
                 </div>
-                <button onclick="exportFilteredSchools('COMPLETED', 'Fully_Onboarded_100_Percent_Schools')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow transition flex items-center space-x-1.5 cursor-pointer">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    <span>Download 100% Excel</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportFilteredSchools('COMPLETED', 'Fully_Onboarded_100_Percent_Schools')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📥 Excel</span>
+                    </button>
+                    <button onclick="exportSchoolsPDF('COMPLETED', 'Fully_Onboarded_100_Percent_Schools')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow transition inline-flex items-center space-x-1 cursor-pointer">
+                        <span>📄 PDF Report</span>
+                    </button>
+                </div>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                    <div class="flex items-center space-x-2">
-                        <select id="completedBlockFilter" onchange="loadCategorizedSchools('COMPLETED', 'completedTableBody')" class="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="completedBlockFilter" onchange="loadCategorizedSchools('COMPLETED', 'completedTableBody')" class="border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none">
                             <option value="ALL">All Blocks</option>
                         </select>
-                        <input type="text" id="completedSearchInput" onkeyup="loadCategorizedSchools('COMPLETED', 'completedTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-56">
+                        <input type="text" id="completedSearchInput" onkeyup="loadCategorizedSchools('COMPLETED', 'completedTableBody')" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-full sm:w-56">
                     </div>
-                    <span class="text-xs text-slate-500 font-semibold" id="completedTotalText">Showing 0 schools</span>
+                    <span class="text-xs text-slate-500 font-bold" id="completedTotalText">Showing 0 schools</span>
                 </div>
-                <div class="overflow-x-auto custom-scroll">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                                 <th class="py-2.5 px-3">#</th>
                                 <th class="py-2.5 px-3">Block</th>
                                 <th class="py-2.5 px-3">School Name</th>
@@ -582,33 +655,38 @@
              TAB 7: ALL SCHOOLS MASTER DIRECTORY
              ========================================================================== -->
         <section id="tab-schools" class="tab-pane hidden space-y-4">
-            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                     <div>
-                        <h2 class="text-lg font-bold text-slate-900">Complete District School Directory</h2>
+                        <h2 class="text-base sm:text-lg font-bold text-slate-900">Complete District School Directory</h2>
                         <p class="text-xs text-slate-400">Searchable by School Name or 11-digit UDISE Code</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <select id="schoolsStatusFilter" onchange="loadAllSchoolsDirectory()" class="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none">
+                        <select id="schoolsStatusFilter" onchange="loadAllSchoolsDirectory()" class="border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none">
                             <option value="ALL">All Statuses</option>
                             <option value="COMPLETED">100% Onboarded</option>
                             <option value="PENDING">Pending (1-99%)</option>
                             <option value="ZERO">Not Onboarded (0%)</option>
                         </select>
-                        <select id="schoolsBlockFilter" onchange="loadAllSchoolsDirectory()" class="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none">
+                        <select id="schoolsBlockFilter" onchange="loadAllSchoolsDirectory()" class="border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none">
                             <option value="ALL">All Blocks</option>
                         </select>
-                        <input type="text" id="schoolsSearchInput" onkeyup="loadAllSchoolsDirectory()" placeholder="Search school name or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-52">
-                        <button onclick="exportFilteredSchools('ALL', 'District_All_Schools_Master')" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer">
-                            📥 Export All
-                        </button>
+                        <input type="text" id="schoolsSearchInput" onkeyup="loadAllSchoolsDirectory()" placeholder="Search school or UDISE..." class="px-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none w-full sm:w-44">
+                        <div class="flex items-center gap-1.5 w-full sm:w-auto">
+                            <button onclick="exportFilteredSchools('ALL', 'District_All_Schools_Master')" class="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer">
+                                📥 Excel
+                            </button>
+                            <button onclick="exportSchoolsPDF('ALL', 'District_All_Schools_Master')" class="flex-1 sm:flex-initial px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm">
+                                📄 PDF
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="overflow-x-auto custom-scroll mt-4">
-                    <table class="w-full text-left border-collapse text-xs">
+                <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 custom-scroll mt-4">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                         <thead>
-                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-semibold border-b border-slate-200">
+                            <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                                 <th class="py-2.5 px-3">#</th>
                                 <th class="py-2.5 px-3">Block Name</th>
                                 <th class="py-2.5 px-3">School Name</th>
@@ -626,13 +704,13 @@
                     </table>
                 </div>
 
-                <!-- Simple Pagination Controls -->
-                <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <!-- Pagination Controls -->
+                <div class="mt-4 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-500 gap-2">
                     <span id="schoolsPaginationInfo">Showing 1 to 100 of 4,811 schools</span>
                     <div class="flex items-center space-x-2">
-                        <button id="btnPrevPage" onclick="changeSchoolsPage(-1)" class="px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-                        <span id="schoolsCurrentPageNum" class="font-bold text-slate-800">1</span>
-                        <button id="btnNextPage" onclick="changeSchoolsPage(1)" class="px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
+                        <button id="btnPrevPage" onclick="changeSchoolsPage(-1)" class="px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">Previous</button>
+                        <span id="schoolsCurrentPageNum" class="font-bold text-slate-800 px-1">1</span>
+                        <button id="btnNextPage" onclick="changeSchoolsPage(1)" class="px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">Next</button>
                     </div>
                 </div>
             </div>
@@ -640,57 +718,57 @@
     </main>
 
     <!-- ==========================================================================
-         MODAL: EXCEL IMPORT DIALOG (DRAG & DROP / FILE SELECT)
+         MODAL: EXCEL IMPORT DIALOG
          ========================================================================== -->
     <div id="uploadModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 relative">
-            <button onclick="closeUploadModal()" class="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer">
+            <button onclick="closeUploadModal()" class="absolute top-5 right-5 text-slate-400 hover:text-slate-600 cursor-pointer p-1">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
 
-            <div class="text-center mb-6">
-                <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto text-2xl mb-2 shadow-inner">
-                    📥
+            <div class="text-center mb-5">
+                <div class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-2xl mb-3 shadow-inner">
+                    📊
                 </div>
-                <h3 class="text-lg font-bold text-slate-900">Import Daily Consolidated Excel</h3>
-                <p class="text-xs text-slate-500">Drop the file downloaded by your Tampermonkey script</p>
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Import Daily Consolidated Excel</h3>
+                <p class="text-xs text-slate-400 mt-1">Select the Excel file downloaded from Prashast</p>
             </div>
 
-            <!-- Dropzone -->
-            <div id="dropzone" class="border-2 border-dashed border-blue-200 hover:border-blue-500 rounded-2xl p-8 text-center bg-blue-50/30 hover:bg-blue-50/60 transition cursor-pointer">
-                <input type="file" id="fileInput" accept=".xlsx, .xls" class="hidden" multiple>
+            <!-- Drag & Drop Zone -->
+            <div id="dropzone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition bg-slate-50 hover:bg-emerald-50/30">
+                <input type="file" id="fileInput" accept=".xlsx, .xls" class="hidden">
                 <div class="text-3xl mb-2">📁</div>
-                <p class="text-sm font-bold text-slate-700">Click to browse or drag file here</p>
-                <p class="text-xs text-slate-400 mt-1">Teacher_Onboarding_All_Blocks_Consolidated_DD-MM-YYYY.xlsx</p>
+                <p class="text-xs sm:text-sm font-bold text-slate-700">Tap to browse file on your device</p>
+                <p class="text-[11px] text-slate-400 mt-1">Teacher_Onboarding_All_Blocks_Consolidated_DD-MM-YYYY.xlsx</p>
             </div>
 
             <!-- Optional Date Override -->
-            <div class="mt-4 flex items-center justify-between text-xs bg-slate-50 p-3 rounded-xl border border-slate-200/60">
-                <span class="text-slate-500 font-semibold">Report Date (DD-MM-YYYY):</span>
-                <input type="text" id="inputDateOverride" placeholder="DD-MM-YYYY" class="border border-slate-300 rounded px-2 py-1 text-xs font-semibold focus:outline-none w-28">
+            <div class="mt-4 flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                <span class="text-slate-600 font-bold">Report Date (DD-MM-YYYY):</span>
+                <input type="text" id="inputDateOverride" placeholder="DD-MM-YYYY" class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-center w-32 focus:outline-none focus:ring-1 focus:ring-emerald-500">
             </div>
 
-            <div id="uploadStatus" class="mt-3 text-center text-xs font-semibold hidden"></div>
-
-            <div class="mt-5 flex space-x-2">
-                <button onclick="closeUploadModal()" class="flex-1 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold">
-                    Cancel
-                </button>
-            </div>
+            <div id="uploadStatus" class="mt-3 text-center text-xs font-bold"></div>
         </div>
     </div>
 
-    <!-- Application Logic Script -->
+    <!-- Floating Loading Toast for PDF Generation -->
+    <div id="pdfToast" class="hidden fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center space-x-3 text-xs">
+        <div class="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+        <span id="pdfToastText" class="font-bold">Generating PDF report...</span>
+    </div>
+
+    <!-- Application Engine Script -->
     <script>
         /* ==========================================================================
-           GLOBAL APPLICATION STATE
+           GLOBAL APPLICATION STATE & DUAL-STORAGE ENGINE (INDEXEDDB + PHP)
            ========================================================================== */
         const APP = {
             currentDate: '',
             availableDates: [],
             dashboardData: null,
             blocksData: [],
-            useLocalDB: false, // Set to true if API is unreachable
+            useLocalDB: false,
             charts: {
                 doughnut: null,
                 trendline: null
@@ -703,7 +781,7 @@
         };
 
         /* ==========================================================================
-           CLIENT-SIDE INDEXEDDB ENGINE (STANDALONE OFFLINE FALLBACK)
+           INDEXEDDB ENGINE FOR 100% OFFLINE / GITHUB PAGES OPERATION
            ========================================================================== */
         const IDB = {
             db: null,
@@ -735,7 +813,6 @@
                     tx.objectStore('snapshots').put(snap);
                     
                     const schoolStore = tx.objectStore('schools');
-                    // Delete old
                     const idx = schoolStore.index('date');
                     const getKeysReq = idx.getAllKeys(snap.report_date);
                     getKeysReq.onsuccess = () => {
@@ -749,6 +826,7 @@
             },
             async getDates() {
                 return new Promise((resolve) => {
+                    if (!IDB.db) return resolve([]);
                     const tx = IDB.db.transaction('snapshots', 'readonly');
                     const req = tx.objectStore('snapshots').getAll();
                     req.onsuccess = () => {
@@ -761,6 +839,7 @@
             },
             async getDashboard(date) {
                 return new Promise((resolve) => {
+                    if (!IDB.db) return resolve(null);
                     const tx = IDB.db.transaction(['snapshots', 'schools'], 'readonly');
                     const snapReq = tx.objectStore('snapshots').get(date);
                     snapReq.onsuccess = () => {
@@ -809,11 +888,141 @@
                                 snapshot: snap,
                                 blocks,
                                 leadingBlocks,
-                                laggingBlocks,
-                                trend: [snap]
+                                laggingBlocks
                             });
                         };
                     };
+                    snapReq.onerror = () => resolve(null);
+                });
+            },
+            async getSchools({ date, status = 'ALL', block = 'ALL', search = '', limit = 100, offset = 0, exportAll = false }) {
+                return new Promise((resolve) => {
+                    if (!IDB.db) return resolve({ records: [], totalCount: 0 });
+                    const tx = IDB.db.transaction('schools', 'readonly');
+                    const store = tx.objectStore('schools');
+                    const idx = store.index('date');
+                    const req = idx.getAll(date);
+
+                    req.onsuccess = () => {
+                        let recs = req.result || [];
+                        if (status && status !== 'ALL') {
+                            recs = recs.filter(r => r.status === status);
+                        }
+                        if (block && block !== 'ALL') {
+                            recs = recs.filter(r => r.block_name === block);
+                        }
+                        if (search) {
+                            const q = search.toLowerCase();
+                            recs = recs.filter(r => (r.school_name && r.school_name.toLowerCase().includes(q)) || 
+                                                    (r.udise_code && r.udise_code.toLowerCase().includes(q)));
+                        }
+
+                        const totalCount = recs.length;
+                        const records = exportAll ? recs : recs.slice(offset, offset + limit);
+                        resolve({ records, totalCount });
+                    };
+                    req.onerror = () => resolve({ records: [], totalCount: 0 });
+                });
+            },
+            async getComparison(date1, date2) {
+                return new Promise(async (resolve) => {
+                    const snap1 = await new Promise(r => {
+                        const tx = IDB.db.transaction('snapshots', 'readonly');
+                        const req = tx.objectStore('snapshots').get(date1);
+                        req.onsuccess = () => r(req.result);
+                        req.onerror = () => r(null);
+                    });
+                    const snap2 = await new Promise(r => {
+                        const tx = IDB.db.transaction('snapshots', 'readonly');
+                        const req = tx.objectStore('snapshots').get(date2);
+                        req.onsuccess = () => r(req.result);
+                        req.onerror = () => r(null);
+                    });
+
+                    if (!snap1 || !snap2) return resolve(null);
+
+                    const recs1 = await new Promise(r => {
+                        const tx = IDB.db.transaction('schools', 'readonly');
+                        const req = tx.objectStore('schools').index('date').getAll(date1);
+                        req.onsuccess = () => r(req.result || []);
+                        req.onerror = () => r([]);
+                    });
+                    const recs2 = await new Promise(r => {
+                        const tx = IDB.db.transaction('schools', 'readonly');
+                        const req = tx.objectStore('schools').index('date').getAll(date2);
+                        req.onsuccess = () => r(req.result || []);
+                        req.onerror = () => r([]);
+                    });
+
+                    // Build block aggregates
+                    const bMap1 = {};
+                    recs1.forEach(r => {
+                        if (!bMap1[r.block_name]) bMap1[r.block_name] = { total: 0, onboarded: 0 };
+                        bMap1[r.block_name].total += r.total_teachers;
+                        bMap1[r.block_name].onboarded += r.teachers_onboarded;
+                    });
+
+                    const bMap2 = {};
+                    recs2.forEach(r => {
+                        if (!bMap2[r.block_name]) bMap2[r.block_name] = { total: 0, onboarded: 0 };
+                        bMap2[r.block_name].total += r.total_teachers;
+                        bMap2[r.block_name].onboarded += r.teachers_onboarded;
+                    });
+
+                    const blockComparisons = [];
+                    Object.keys(bMap2).forEach(bName => {
+                        const d1 = bMap1[bName] || { total: 0, onboarded: 0 };
+                        const d2 = bMap2[bName];
+                        const d1Pct = d1.total > 0 ? parseFloat(((d1.onboarded / d1.total) * 100).toFixed(2)) : 0;
+                        const d2Pct = d2.total > 0 ? parseFloat(((d2.onboarded / d2.total) * 100).toFixed(2)) : 0;
+                        blockComparisons.push({
+                            block_name: bName,
+                            total_teachers: d2.total,
+                            date1_onboarded: d1.onboarded,
+                            date2_onboarded: d2.onboarded,
+                            change_teachers: d2.onboarded - d1.onboarded,
+                            date1_pct: d1Pct,
+                            date2_pct: d2Pct,
+                            change_pct: parseFloat((d2Pct - d1Pct).toFixed(2))
+                        });
+                    });
+
+                    blockComparisons.sort((a,b) => b.change_teachers - a.change_teachers);
+                    const topImprovingBlocks = blockComparisons.slice(0, 5);
+
+                    // Newly completed schools
+                    const recs1Udise = new Map(recs1.map(r => [r.udise_code, r]));
+                    const newlyCompletedSchools = [];
+                    recs2.forEach(r2 => {
+                        if (r2.status === 'COMPLETED') {
+                            const r1 = recs1Udise.get(r2.udise_code);
+                            if (!r1 || r1.status !== 'COMPLETED') {
+                                newlyCompletedSchools.push(r2);
+                            }
+                        }
+                    });
+
+                    const districtDiff = {
+                        date1_onboarded: snap1.teachers_onboarded,
+                        date2_onboarded: snap2.teachers_onboarded,
+                        net_teachers_added: snap2.teachers_onboarded - snap1.teachers_onboarded,
+                        date1_pct: snap1.onboarded_pct,
+                        date2_pct: snap2.onboarded_pct,
+                        net_pct_change: parseFloat((snap2.onboarded_pct - snap1.onboarded_pct).toFixed(2)),
+                        newly_completed_schools: snap2.schools_completed - snap1.schools_completed,
+                        zero_schools_reduced: snap1.schools_zero - snap2.schools_zero,
+                        date2_completed: snap2.schools_completed,
+                        date1_completed: snap1.schools_completed,
+                        date2_zero: snap2.schools_zero,
+                        date1_zero: snap1.schools_zero
+                    };
+
+                    resolve({
+                        districtDiff,
+                        blockComparisons,
+                        topImprovingBlocks,
+                        newlyCompletedSchools
+                    });
                 });
             }
         };
@@ -854,7 +1063,7 @@
         }
 
         /* ==========================================================================
-           INITIALIZATION
+           INITIALIZATION & NAVIGATION
            ========================================================================== */
         document.addEventListener('DOMContentLoaded', async () => {
             setupTabNavigation();
@@ -881,9 +1090,14 @@
             document.querySelectorAll('.nav-tab').forEach(btn => {
                 const isActive = btn.getAttribute('data-tab') === tabId;
                 btn.classList.toggle('active', isActive);
-                btn.classList.toggle('bg-white/15', isActive);
+                btn.classList.toggle('bg-white/20', isActive);
                 btn.classList.toggle('text-white', isActive);
-                btn.classList.toggle('font-semibold', isActive);
+                btn.classList.toggle('font-bold', isActive);
+                btn.classList.toggle('shadow-sm', isActive);
+                btn.classList.toggle('text-blue-200', !isActive);
+                if (isActive) {
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
             });
 
             document.querySelectorAll('.tab-pane').forEach(pane => {
@@ -911,7 +1125,7 @@
         }
 
         /* ==========================================================================
-           DATA LOADING (DUAL BACKEND)
+           DATA LOADING (DUAL BACKEND: PHP API OR CLIENT-SIDE INDEXEDDB)
            ========================================================================== */
         async function loadAvailableDates() {
             try {
@@ -925,13 +1139,12 @@
                     return;
                 }
             } catch (err) {
-                console.warn('PHP API offline, trying browser IndexedDB storage...');
+                // Falling back to IndexedDB
             }
 
-            // Fallback to IndexedDB
             APP.useLocalDB = true;
             const idbDates = await IDB.getDates();
-            if (idbDates && idbDates.length > 0) {
+            if (idbDates.length > 0) {
                 APP.availableDates = idbDates;
                 populateDateDropdown(idbDates);
             } else {
@@ -963,129 +1176,67 @@
                     const res = await fetch(`api/get_dashboard.php?date=${date}`);
                     const json = await res.json();
                     if (json.success && json.hasData) {
-                        APP.dashboardData = json;
-                        APP.blocksData = json.blocks || [];
-                        renderKPICards(json.snapshot);
-                        renderCharts(json.snapshot, json.trend);
-                        renderLeadingLagging(json.leadingBlocks, json.laggingBlocks);
-                        populateBlockDropdowns(json.blocks);
+                        applyDashboardData(json.snapshot, json.blocks, json.leadingBlocks, json.laggingBlocks, json.trend);
                         return;
                     }
-                } catch (err) {
-                    console.warn('API error, falling back to IDB');
-                }
+                } catch (e) {}
             }
 
             // Local DB fallback
             const localDash = await IDB.getDashboard(date);
             if (localDash) {
-                APP.dashboardData = localDash;
-                APP.blocksData = localDash.blocks;
-                renderKPICards(localDash.snapshot);
-                renderCharts(localDash.snapshot, localDash.trend);
-                renderLeadingLagging(localDash.leadingBlocks, localDash.laggingBlocks);
-                populateBlockDropdowns(localDash.blocks);
+                applyDashboardData(localDash.snapshot, localDash.blocks, localDash.leadingBlocks, localDash.laggingBlocks);
             }
         }
 
-        function populateBlockDropdowns(blocks) {
-            const dropdownIds = ['zeroBlockFilter', 'pendingBlockFilter', 'completedBlockFilter', 'schoolsBlockFilter'];
-            dropdownIds.forEach(id => {
-                const el = document.getElementById(id);
-                if (!el) return;
-                const currentVal = el.value || 'ALL';
-                el.innerHTML = '<option value="ALL">All Blocks</option>';
-                blocks.forEach(b => {
-                    const opt = document.createElement('option');
-                    opt.value = b.block_name;
-                    opt.innerText = b.block_name;
-                    el.appendChild(opt);
-                });
-                el.value = currentVal;
-            });
+        function applyDashboardData(snap, blocks, leading, lagging, trend) {
+            APP.blocksData = blocks || [];
+            renderKPICards(snap);
+            renderCharts(snap, trend);
+            renderLeadingLagging(leading, lagging);
+            populateBlockDropdowns(blocks);
+
+            if (snap) {
+                document.getElementById('badgeZeroCount').innerText = snap.schools_zero || 0;
+                document.getElementById('badgePendingCount').innerText = snap.schools_pending || 0;
+                document.getElementById('badgeCompletedCount').innerText = snap.schools_completed || 0;
+            }
         }
 
-        /* ==========================================================================
-           RENDER KPI CARDS & LEADERBOARDS
-           ========================================================================== */
         function renderKPICards(snap) {
             if (!snap) return;
+            document.getElementById('kpiTeachersOnboarded').innerText = Number(snap.teachers_onboarded || 0).toLocaleString();
+            document.getElementById('kpiTotalTeachers').innerText = Number(snap.total_teachers || 0).toLocaleString();
+            document.getElementById('kpiOnboardedPct').innerText = `${snap.onboarded_pct || 0}%`;
+            document.getElementById('kpiProgressBar').style.width = `${snap.onboarded_pct || 0}%`;
 
-            document.getElementById('kpiTeachersOnboarded').innerText = Number(snap.teachers_onboarded).toLocaleString();
-            document.getElementById('kpiTotalTeachers').innerText = Number(snap.total_teachers).toLocaleString();
-            document.getElementById('kpiOnboardedPct').innerText = `${snap.onboarded_pct}%`;
-            document.getElementById('kpiProgressBar').style.width = `${Math.min(100, snap.onboarded_pct)}%`;
-
-            document.getElementById('kpiCompletedSchools').innerText = Number(snap.schools_completed).toLocaleString();
+            document.getElementById('kpiCompletedSchools').innerText = Number(snap.schools_completed || 0).toLocaleString();
             const compPct = snap.total_schools > 0 ? ((snap.schools_completed / snap.total_schools) * 100).toFixed(1) : 0;
             document.getElementById('kpiCompletedSchoolsPct').innerText = `${compPct}%`;
-            document.getElementById('kpiTotalSchools').innerText = `${Number(snap.total_schools).toLocaleString()} Schools`;
 
-            document.getElementById('kpiZeroSchools').innerText = Number(snap.schools_zero).toLocaleString();
+            document.getElementById('kpiTotalSchools').innerText = `${Number(snap.total_schools || 0).toLocaleString()} Schools`;
+            document.getElementById('kpiZeroSchools').innerText = Number(snap.schools_zero || 0).toLocaleString();
             const zeroPct = snap.total_schools > 0 ? ((snap.schools_zero / snap.total_schools) * 100).toFixed(1) : 0;
             document.getElementById('kpiZeroSchoolsPct').innerText = `${zeroPct}%`;
 
-            document.getElementById('kpiPendingSchools').innerText = Number(snap.schools_pending).toLocaleString();
-            const pendingTeachers = Math.max(0, snap.total_teachers - snap.teachers_onboarded);
+            document.getElementById('kpiPendingSchools').innerText = Number(snap.schools_pending || 0).toLocaleString();
+            const pendingTeachers = (snap.total_teachers || 0) - (snap.teachers_onboarded || 0);
             document.getElementById('kpiPendingTeachers').innerText = Number(pendingTeachers).toLocaleString();
-            document.getElementById('kpiTotalBlocks').innerText = `${snap.total_blocks} Blocks`;
-
-            document.getElementById('badgeZeroCount').innerText = snap.schools_zero;
-            document.getElementById('badgePendingCount').innerText = snap.schools_pending;
-            document.getElementById('badgeCompletedCount').innerText = snap.schools_completed;
-        }
-
-        function renderLeadingLagging(leading, lagging) {
-            const leadingContainer = document.getElementById('leadingBlocksList');
-            leadingContainer.innerHTML = '';
-            (leading || []).forEach((b, idx) => {
-                const item = document.createElement('div');
-                item.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-emerald-200 transition';
-                item.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center">#${idx + 1}</span>
-                        <div>
-                            <h4 class="text-xs font-bold text-slate-800">${b.block_name}</h4>
-                            <p class="text-[11px] text-slate-400">${b.teachers_onboarded} / ${b.total_teachers} teachers &bull; ${b.schools_completed} of ${b.total_schools} schools 100%</p>
-                        </div>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-xs font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">${b.onboarded_pct}%</span>
-                    </div>
-                `;
-                leadingContainer.appendChild(item);
-            });
-
-            const laggingContainer = document.getElementById('laggingBlocksList');
-            laggingContainer.innerHTML = '';
-            (lagging || []).forEach((b, idx) => {
-                const item = document.createElement('div');
-                item.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-red-200 transition';
-                item.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <span class="w-6 h-6 rounded-full bg-red-100 text-red-800 text-xs font-bold flex items-center justify-center">${idx + 1}</span>
-                        <div>
-                            <h4 class="text-xs font-bold text-slate-800">${b.block_name}</h4>
-                            <p class="text-[11px] text-slate-400">${b.pending_teachers} pending &bull; ${b.schools_zero} schools at 0%</p>
-                        </div>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-xs font-black text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-200">${b.onboarded_pct}%</span>
-                    </div>
-                `;
-                laggingContainer.appendChild(item);
-            });
+            document.getElementById('kpiTotalBlocks').innerText = `${snap.total_blocks || 44} Blocks`;
         }
 
         function renderCharts(snap, trend) {
+            if (!snap) return;
+
+            // Doughnut Chart
             if (APP.charts.doughnut) APP.charts.doughnut.destroy();
             const ctxDoughnut = document.getElementById('chartStatusDoughnut').getContext('2d');
             APP.charts.doughnut = new Chart(ctxDoughnut, {
                 type: 'doughnut',
                 data: {
-                    labels: ['100% Onboarded', 'Pending (1-99%)', 'Not Started (0%)'],
+                    labels: ['100% Completed', 'Pending (1-99%)', 'Not Started (0%)'],
                     datasets: [{
-                        data: [snap.schools_completed, snap.schools_pending, snap.schools_zero],
+                        data: [snap.schools_completed || 0, snap.schools_pending || 0, snap.schools_zero || 0],
                         backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
                         borderWidth: 2,
                         borderColor: '#ffffff'
@@ -1095,12 +1246,13 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+                        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10, weight: 'bold' } } }
                     },
                     cutout: '65%'
                 }
             });
 
+            // Trendline Chart
             if (APP.charts.trendline) APP.charts.trendline.destroy();
             const ctxTrend = document.getElementById('chartTrendline').getContext('2d');
             const trendDates = (trend || []).map(t => formatDMY(t.report_date));
@@ -1125,17 +1277,76 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    scales: {
+                        y: { min: 0, max: 100, ticks: { callback: v => v + '%', font: { size: 10 } } },
+                        x: { ticks: { font: { size: 10 } } }
+                    },
                     plugins: {
                         legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            min: 0,
-                            max: 100,
-                            ticks: { callback: v => v + '%' }
-                        }
                     }
                 }
+            });
+        }
+
+        function renderLeadingLagging(leading, lagging) {
+            const leadingList = document.getElementById('leadingBlocksList');
+            const laggingList = document.getElementById('laggingBlocksList');
+
+            leadingList.innerHTML = '';
+            (leading || []).forEach((b, idx) => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-2.5">
+                        <span class="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center">${idx + 1}</span>
+                        <div>
+                            <h4 class="font-bold text-xs text-slate-800">${b.block_name}</h4>
+                            <p class="text-[10px] text-slate-400">${b.teachers_onboarded} of ${b.total_teachers} teachers</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs font-black text-emerald-600">${b.onboarded_pct}%</span>
+                        <p class="text-[10px] text-slate-400">${b.schools_completed} schools 100%</p>
+                    </div>
+                `;
+                leadingList.appendChild(item);
+            });
+
+            laggingList.innerHTML = '';
+            (lagging || []).forEach((b, idx) => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-2.5">
+                        <span class="w-6 h-6 rounded-lg bg-red-100 text-red-800 font-bold text-xs flex items-center justify-center">${idx + 1}</span>
+                        <div>
+                            <h4 class="font-bold text-xs text-slate-800">${b.block_name}</h4>
+                            <p class="text-[10px] text-slate-400">${b.pending_teachers} teachers pending</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs font-black text-red-600">${b.onboarded_pct}%</span>
+                        <p class="text-[10px] text-slate-400">${b.schools_zero} schools at 0%</p>
+                    </div>
+                `;
+                laggingList.appendChild(item);
+            });
+        }
+
+        function populateBlockDropdowns(blocks) {
+            const dropdownIds = ['zeroBlockFilter', 'pendingBlockFilter', 'completedBlockFilter', 'schoolsBlockFilter'];
+            dropdownIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const currentVal = el.value || 'ALL';
+                el.innerHTML = '<option value="ALL">All Blocks</option>';
+                (blocks || []).forEach(b => {
+                    const opt = document.createElement('option');
+                    opt.value = b.block_name;
+                    opt.innerText = b.block_name;
+                    el.appendChild(opt);
+                });
+                el.value = currentVal;
             });
         }
 
@@ -1145,34 +1356,33 @@
         function renderBlocksTable() {
             const tbody = document.getElementById('blocksTableBody');
             tbody.innerHTML = '';
-            const search = (document.getElementById('blockSearchInput').value || '').toLowerCase();
 
+            const search = (document.getElementById('blockSearchInput').value || '').toLowerCase();
             const filtered = APP.blocksData.filter(b => b.block_name.toLowerCase().includes(search));
 
             filtered.forEach((b, idx) => {
                 const tr = document.createElement('tr');
-                tr.className = 'hover:bg-blue-50/40 transition';
-
-                const pctColor = b.onboarded_pct >= 80 ? 'text-emerald-600 bg-emerald-50 border-emerald-200' :
-                                 (b.onboarded_pct >= 50 ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-red-600 bg-red-50 border-red-200');
-
+                tr.className = 'hover:bg-slate-50 transition';
                 tr.innerHTML = `
-                    <td class="py-3 px-3 font-semibold text-slate-400">${idx + 1}</td>
-                    <td class="py-3 px-3 font-bold text-slate-800">${b.block_name}</td>
-                    <td class="py-3 px-3 text-right font-semibold text-slate-600">${b.total_schools}</td>
-                    <td class="py-3 px-3 text-right font-semibold text-slate-600">${Number(b.total_teachers).toLocaleString()}</td>
-                    <td class="py-3 px-3 text-right font-bold text-slate-800">${Number(b.teachers_onboarded).toLocaleString()}</td>
-                    <td class="py-3 px-3 text-right font-semibold text-amber-700">${Number(b.pending_teachers).toLocaleString()}</td>
-                    <td class="py-3 px-3 text-center">
-                        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-black border ${pctColor}">
-                            ${b.onboarded_pct}%
-                        </span>
+                    <td class="py-2.5 px-3 text-slate-400 font-semibold">${idx + 1}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-900">${b.block_name}</td>
+                    <td class="py-2.5 px-3 text-right font-medium text-slate-600">${b.total_schools}</td>
+                    <td class="py-2.5 px-3 text-right font-semibold text-slate-700">${b.total_teachers}</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-emerald-700">${b.teachers_onboarded}</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-amber-700">${b.pending_teachers}</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <div class="flex items-center justify-center space-x-1.5">
+                            <div class="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div class="bg-blue-600 h-full rounded-full" style="width: ${b.onboarded_pct}%"></div>
+                            </div>
+                            <span class="text-xs font-black text-slate-800">${b.onboarded_pct}%</span>
+                        </div>
                     </td>
-                    <td class="py-3 px-3 text-center font-bold text-emerald-600">${b.schools_completed}</td>
-                    <td class="py-3 px-3 text-center font-bold ${b.schools_zero > 0 ? 'text-red-600 bg-red-50/50 rounded' : 'text-slate-400'}">${b.schools_zero}</td>
-                    <td class="py-3 px-3 text-center">
-                        <button onclick="filterSchoolsByBlock('${b.block_name}')" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded text-[11px] transition cursor-pointer">
-                            View Schools &rarr;
+                    <td class="py-2.5 px-3 text-center font-bold text-emerald-600">${b.schools_completed}</td>
+                    <td class="py-2.5 px-3 text-center font-bold text-red-600">${b.schools_zero}</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <button onclick="viewBlockSchools('${b.block_name}')" class="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-[11px] transition">
+                            Schools &rarr;
                         </button>
                     </td>
                 `;
@@ -1180,12 +1390,12 @@
             });
         }
 
-        document.getElementById('blockSearchInput').addEventListener('input', renderBlocksTable);
+        document.getElementById('blockSearchInput')?.addEventListener('keyup', renderBlocksTable);
 
-        function filterSchoolsByBlock(blockName) {
+        function viewBlockSchools(blockName) {
+            const blockSelect = document.getElementById('schoolsBlockFilter');
+            if (blockSelect) blockSelect.value = blockName;
             switchTab('schools');
-            document.getElementById('schoolsBlockFilter').value = blockName;
-            loadAllSchoolsDirectory();
         }
 
         function exportBlocksTable() {
@@ -1241,19 +1451,144 @@
             document.getElementById('thDate1Pct').innerText = `${formatDMY(date1)} %`;
             document.getElementById('thDate2Pct').innerText = `${formatDMY(date2)} %`;
 
-            try {
-                const res = await fetch(`api/compare.php?date1=${date1}&date2=${date2}`);
-                const json = await res.json();
-
-                if (json.success && json.hasData) {
-                    renderComparisonMetrics(json.districtDiff);
-                    renderTopImprovingBlocks(json.topImprovingBlocks);
-                    renderNewlyCompletedSchools(json.newlyCompletedSchools);
-                    renderBlockComparisonTable(json.blockComparisons);
-                }
-            } catch (err) {
-                console.error('Comparison error:', err);
+            if (!APP.useLocalDB) {
+                try {
+                    const res = await fetch(`api/compare.php?date1=${date1}&date2=${date2}`);
+                    const json = await res.json();
+                    if (json.success && json.hasData) {
+                        renderComparisonMetrics(json.districtDiff);
+                        renderTopImprovingBlocks(json.topImprovingBlocks);
+                        renderNewlyCompletedSchools(json.newlyCompletedSchools);
+                        renderBlockComparisonTable(json.blockComparisons);
+                        return;
+                    }
+                } catch (err) {}
             }
+
+            // Local IndexedDB comparison
+            const cmp = await IDB.getComparison(date1, date2);
+            if (cmp) {
+                renderComparisonMetrics(cmp.districtDiff);
+                renderTopImprovingBlocks(cmp.topImprovingBlocks);
+                renderNewlyCompletedSchools(cmp.newlyCompletedSchools);
+                renderBlockComparisonTable(cmp.blockComparisons);
+            }
+        }
+
+        function renderComparisonMetrics(diff) {
+            const container = document.getElementById('comparisonMetricsRow');
+            if (!diff) return;
+
+            container.innerHTML = `
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
+                    <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Teachers Added</p>
+                    <h3 class="text-2xl font-black ${diff.net_teachers_added >= 0 ? 'text-emerald-600' : 'text-red-600'} mt-1">
+                        ${diff.net_teachers_added >= 0 ? '+' : ''}${Number(diff.net_teachers_added).toLocaleString()}
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">${diff.date1_onboarded.toLocaleString()} &rarr; ${diff.date2_onboarded.toLocaleString()}</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
+                    <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">District % Growth</p>
+                    <h3 class="text-2xl font-black ${diff.net_pct_change >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1">
+                        ${diff.net_pct_change >= 0 ? '+' : ''}${diff.net_pct_change}%
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">${diff.date1_pct}% &rarr; ${diff.date2_pct}%</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
+                    <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">100% Schools Gain</p>
+                    <h3 class="text-2xl font-black text-emerald-600 mt-1">+${diff.newly_completed_schools}</h3>
+                    <p class="text-xs text-slate-500 mt-1">total ${diff.date2_completed} schools at 100%</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
+                    <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">0% Schools Reduced</p>
+                    <h3 class="text-2xl font-black ${diff.zero_schools_reduced > 0 ? 'text-emerald-600' : 'text-slate-600'} mt-1">
+                        ${diff.zero_schools_reduced > 0 ? '-' : ''}${Math.abs(diff.zero_schools_reduced)}
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">${diff.date1_zero} &rarr; ${diff.date2_zero} schools</p>
+                </div>
+            `;
+        }
+
+        function renderTopImprovingBlocks(blocks) {
+            const container = document.getElementById('topImprovingBlocksList');
+            container.innerHTML = '';
+
+            (blocks || []).forEach((b, idx) => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between p-2.5 rounded-xl bg-emerald-50/50 border border-emerald-100 text-xs';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-2.5">
+                        <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center text-xs">${idx + 1}</span>
+                        <div>
+                            <h4 class="font-bold text-slate-800">${b.block_name}</h4>
+                            <p class="text-[11px] text-slate-400">${b.date1_onboarded} &rarr; ${b.date2_onboarded} teachers</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="font-black text-emerald-700 text-sm">+${b.change_teachers} Teachers</span>
+                        <p class="text-[11px] text-emerald-600 font-bold">+${b.change_pct}% Growth</p>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function renderNewlyCompletedSchools(schools) {
+            const container = document.getElementById('newlyCompletedList');
+            const countBadge = document.getElementById('newlyCompletedCount');
+            countBadge.innerText = `${(schools || []).length} Schools`;
+            container.innerHTML = '';
+
+            if (!schools || schools.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-400 py-4 text-center">No schools crossed the 100% threshold today.</p>';
+                return;
+            }
+
+            schools.forEach(s => {
+                const item = document.createElement('div');
+                item.className = 'p-2.5 rounded-xl bg-blue-50/50 border border-blue-100 text-xs';
+                item.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <h5 class="font-bold text-slate-800">${s.school_name}</h5>
+                        <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">100%</span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5 flex items-center justify-between">
+                        <span>${s.block_name} &bull; UDISE: ${s.udise_code}</span>
+                        <span class="text-slate-600 font-bold">${s.total_teachers} Teachers</span>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function renderBlockComparisonTable(blocks) {
+            const tbody = document.getElementById('blockComparisonTableBody');
+            tbody.innerHTML = '';
+
+            (blocks || []).forEach(b => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition';
+                const isPositive = b.change_teachers > 0;
+
+                tr.innerHTML = `
+                    <td class="py-2.5 px-3 font-bold text-slate-800">${b.block_name}</td>
+                    <td class="py-2.5 px-3 text-right font-semibold text-slate-600">${Number(b.total_teachers).toLocaleString()}</td>
+                    <td class="py-2.5 px-3 text-right font-medium text-slate-500">${b.date1_onboarded}</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-slate-800">${b.date2_onboarded}</td>
+                    <td class="py-2.5 px-3 text-right font-black ${isPositive ? 'text-emerald-600' : 'text-slate-400'}">
+                        ${isPositive ? '+' : ''}${b.change_teachers}
+                    </td>
+                    <td class="py-2.5 px-3 text-right text-slate-500">${b.date1_pct}%</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-slate-800">${b.date2_pct}%</td>
+                    <td class="py-2.5 px-3 text-right font-black ${b.change_pct > 0 ? 'text-blue-600' : 'text-slate-400'}">
+                        ${b.change_pct > 0 ? '+' : ''}${b.change_pct}%
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
         }
 
         function exportComparisonTable() {
@@ -1276,122 +1611,11 @@
                     });
                 }
             });
-            if (rows.length === 0) return;
+
             const ws = XLSX.utils.json_to_sheet(rows);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Comparison");
             XLSX.writeFile(wb, `Prashast_Comparison_${formatDMY(date1)}_vs_${formatDMY(date2)}.xlsx`);
-        }
-
-        function renderComparisonMetrics(diff) {
-            const container = document.getElementById('comparisonMetricsRow');
-            const isGain = diff.teachers_diff >= 0;
-
-            container.innerHTML = `
-                <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-                    <p class="text-xs font-semibold text-slate-400 uppercase">Net Teachers Added</p>
-                    <h3 class="text-2xl font-black ${isGain ? 'text-emerald-600' : 'text-red-600'} mt-1">
-                        ${isGain ? '+' : ''}${diff.teachers_diff.toLocaleString()}
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">from ${diff.date1_onboarded.toLocaleString()} &rarr; ${diff.date2_onboarded.toLocaleString()}</p>
-                </div>
-                <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-                    <p class="text-xs font-semibold text-slate-400 uppercase">District % Change</p>
-                    <h3 class="text-2xl font-black ${diff.pct_diff >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1">
-                        ${diff.pct_diff >= 0 ? '+' : ''}${diff.pct_diff}%
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">from ${diff.date1_pct}% &rarr; ${diff.date2_pct}%</p>
-                </div>
-                <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-                    <p class="text-xs font-semibold text-emerald-600 uppercase">Newly Completed Schools</p>
-                    <h3 class="text-2xl font-black text-emerald-600 mt-1">
-                        +${diff.completed_diff}
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">total ${diff.date2_completed} schools now at 100%</p>
-                </div>
-                <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-                    <p class="text-xs font-semibold text-red-600 uppercase">Reduction in 0% Schools</p>
-                    <h3 class="text-2xl font-black ${diff.zero_diff <= 0 ? 'text-emerald-600' : 'text-red-600'} mt-1">
-                        ${diff.zero_diff <= 0 ? '' : '+'}${diff.zero_diff}
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">from ${diff.date1_zero} &rarr; ${diff.date2_zero} schools remaining at 0%</p>
-                </div>
-            `;
-        }
-
-        function renderTopImprovingBlocks(blocks) {
-            const container = document.getElementById('topImprovingBlocksList');
-            container.innerHTML = '';
-            (blocks || []).forEach(b => {
-                const item = document.createElement('div');
-                item.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100';
-                item.innerHTML = `
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-800">${b.block_name}</h4>
-                        <p class="text-[11px] text-slate-400">${b.date1_onboarded} &rarr; ${b.date2_onboarded} (${b.date1_pct}% to ${b.date2_pct}%)</p>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-xs font-black px-2.5 py-1 rounded-lg ${b.change_teachers > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600'}">
-                            ${b.change_teachers > 0 ? '+' : ''}${b.change_teachers} Teachers
-                        </span>
-                    </div>
-                `;
-                container.appendChild(item);
-            });
-        }
-
-        function renderNewlyCompletedSchools(schools) {
-            const container = document.getElementById('newlyCompletedList');
-            document.getElementById('newlyCompletedCount').innerText = `${(schools || []).length} Schools`;
-            container.innerHTML = '';
-
-            if (!schools || schools.length === 0) {
-                container.innerHTML = '<p class="text-xs text-slate-400 text-center py-6">No schools newly completed on this day.</p>';
-                return;
-            }
-
-            schools.forEach(s => {
-                const item = document.createElement('div');
-                item.className = 'p-2.5 rounded-lg bg-emerald-50/50 border border-emerald-100 text-xs';
-                item.innerHTML = `
-                    <div class="flex items-center justify-between">
-                        <h5 class="font-bold text-slate-800">${s.school_name}</h5>
-                        <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">100%</span>
-                    </div>
-                    <div class="text-[11px] text-slate-500 mt-0.5 flex items-center justify-between">
-                        <span>${s.block_name} &bull; UDISE: ${s.udise_code}</span>
-                        <span class="text-slate-600 font-semibold">${s.total_teachers} Teachers</span>
-                    </div>
-                `;
-                container.appendChild(item);
-            });
-        }
-
-        function renderBlockComparisonTable(blocks) {
-            const tbody = document.getElementById('blockComparisonTableBody');
-            tbody.innerHTML = '';
-
-            (blocks || []).forEach(b => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-slate-50/60 transition';
-                const isPositive = b.change_teachers > 0;
-
-                tr.innerHTML = `
-                    <td class="py-2.5 px-3 font-bold text-slate-800">${b.block_name}</td>
-                    <td class="py-2.5 px-3 text-right font-semibold text-slate-600">${Number(b.total_teachers).toLocaleString()}</td>
-                    <td class="py-2.5 px-3 text-right font-semibold text-slate-500">${b.date1_onboarded}</td>
-                    <td class="py-2.5 px-3 text-right font-bold text-slate-800">${b.date2_onboarded}</td>
-                    <td class="py-2.5 px-3 text-right font-black ${isPositive ? 'text-emerald-600' : 'text-slate-400'}">
-                        ${isPositive ? '+' : ''}${b.change_teachers}
-                    </td>
-                    <td class="py-2.5 px-3 text-right text-slate-500">${b.date1_pct}%</td>
-                    <td class="py-2.5 px-3 text-right font-bold text-slate-800">${b.date2_pct}%</td>
-                    <td class="py-2.5 px-3 text-right font-bold ${b.change_pct > 0 ? 'text-blue-600' : 'text-slate-400'}">
-                        ${b.change_pct > 0 ? '+' : ''}${b.change_pct}%
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
         }
 
         /* ==========================================================================
@@ -1415,81 +1639,133 @@
                 search = document.getElementById('completedSearchInput').value;
             }
 
-            try {
-                const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&search=${encodeURIComponent(search)}&limit=150`;
-                const res = await fetch(url);
-                const json = await res.json();
+            let records = [];
+            let totalCount = 0;
 
-                if (json.success) {
-                    if (status === 'ZERO') document.getElementById('zeroTotalText').innerText = `Total: ${json.totalCount} Schools`;
-                    if (status === 'PENDING') document.getElementById('pendingTotalText').innerText = `Total: ${json.totalCount} Schools`;
-                    if (status === 'COMPLETED') document.getElementById('completedTotalText').innerText = `Total: ${json.totalCount} Schools`;
-
-                    tbody.innerHTML = '';
-                    if (json.records.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">No schools matching this filter.</td></tr>';
-                        return;
+            if (!APP.useLocalDB) {
+                try {
+                    const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&search=${encodeURIComponent(search)}&limit=150`;
+                    const res = await fetch(url);
+                    const json = await res.json();
+                    if (json.success) {
+                        records = json.records || [];
+                        totalCount = json.totalCount || 0;
                     }
-
-                    json.records.forEach((s, idx) => {
-                        const tr = document.createElement('tr');
-                        tr.className = 'hover:bg-slate-50 transition';
-
-                        if (status === 'PENDING') {
-                            tr.innerHTML = `
-                                <td class="py-2.5 px-3 text-slate-400 font-semibold">${idx + 1}</td>
-                                <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
-                                <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
-                                <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
-                                <td class="py-2.5 px-3 text-right font-semibold text-slate-600">${s.total_teachers}</td>
-                                <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
-                                <td class="py-2.5 px-3 text-right font-black text-amber-700">${s.pending_teachers}</td>
-                                <td class="py-2.5 px-3 text-center">
-                                    <div class="flex items-center justify-center space-x-1.5">
-                                        <div class="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                            <div class="bg-amber-500 h-full rounded-full" style="width: ${s.onboarded_pct}%"></div>
-                                        </div>
-                                        <span class="text-[11px] font-bold text-amber-800">${s.onboarded_pct}%</span>
-                                    </div>
-                                </td>
-                            `;
-                        } else {
-                            const badge = s.status === 'COMPLETED' ? '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">100% Completed</span>' :
-                                                                     '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800">0% Not Started</span>';
-                            tr.innerHTML = `
-                                <td class="py-2.5 px-3 text-slate-400 font-semibold">${idx + 1}</td>
-                                <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
-                                <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
-                                <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
-                                <td class="py-2.5 px-3 text-right font-semibold text-slate-600">${s.total_teachers}</td>
-                                <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
-                                <td class="py-2.5 px-3 text-center">${badge}</td>
-                            `;
-                        }
-                        tbody.appendChild(tr);
-                    });
-                }
-            } catch (err) {
-                console.error(err);
+                } catch (e) {}
             }
+
+            if (records.length === 0 && totalCount === 0) {
+                const res = await IDB.getSchools({
+                    date: APP.currentDate,
+                    status,
+                    block,
+                    search,
+                    limit: 150
+                });
+                records = res.records;
+                totalCount = res.totalCount;
+            }
+
+            if (status === 'ZERO') document.getElementById('zeroTotalText').innerText = `Total: ${totalCount} Schools`;
+            if (status === 'PENDING') document.getElementById('pendingTotalText').innerText = `Total: ${totalCount} Schools`;
+            if (status === 'COMPLETED') document.getElementById('completedTotalText').innerText = `Total: ${totalCount} Schools`;
+
+            tbody.innerHTML = '';
+            if (records.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">No schools matching this filter.</td></tr>';
+                return;
+            }
+
+            records.forEach((s, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition';
+
+                if (status === 'PENDING') {
+                    const pendingTeachers = s.total_teachers - s.teachers_onboarded;
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 text-slate-400 font-semibold">${idx + 1}</td>
+                        <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
+                        <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
+                        <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
+                        <td class="py-2.5 px-3 text-right font-medium text-slate-600">${s.total_teachers}</td>
+                        <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
+                        <td class="py-2.5 px-3 text-right font-black text-amber-700">${pendingTeachers}</td>
+                        <td class="py-2.5 px-3 text-center">
+                            <div class="flex items-center justify-center space-x-1.5">
+                                <div class="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                    <div class="bg-amber-500 h-full rounded-full" style="width: ${s.onboarded_pct}%"></div>
+                                </div>
+                                <span class="text-[11px] font-black text-amber-800">${s.onboarded_pct}%</span>
+                            </div>
+                        </td>
+                    `;
+                } else {
+                    const badge = s.status === 'COMPLETED' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">100% Completed</span>' :
+                                                             '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">0% Not Started</span>';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 text-slate-400 font-semibold">${idx + 1}</td>
+                        <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
+                        <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
+                        <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
+                        <td class="py-2.5 px-3 text-right font-medium text-slate-600">${s.total_teachers}</td>
+                        <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
+                        <td class="py-2.5 px-3 text-center">${badge}</td>
+                    `;
+                }
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function getFilteredRecordsForExport(status) {
+            let block = 'ALL';
+            let search = '';
+            if (status === 'ZERO') {
+                block = document.getElementById('zeroBlockFilter').value;
+                search = document.getElementById('zeroSearchInput').value;
+            } else if (status === 'PENDING') {
+                block = document.getElementById('pendingBlockFilter').value;
+                search = document.getElementById('pendingSearchInput').value;
+            } else if (status === 'COMPLETED') {
+                block = document.getElementById('completedBlockFilter').value;
+                search = document.getElementById('completedSearchInput').value;
+            } else if (status === 'ALL') {
+                status = document.getElementById('schoolsStatusFilter').value;
+                block = document.getElementById('schoolsBlockFilter').value;
+                search = document.getElementById('schoolsSearchInput').value;
+            }
+
+            if (!APP.useLocalDB) {
+                try {
+                    const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&search=${encodeURIComponent(search)}&export=1`;
+                    const res = await fetch(url);
+                    const json = await res.json();
+                    if (json.success && json.records) {
+                        return json.records;
+                    }
+                } catch (e) {}
+            }
+
+            // Local IndexedDB export
+            const res = await IDB.getSchools({
+                date: APP.currentDate,
+                status,
+                block,
+                search,
+                exportAll: true
+            });
+            return res.records;
         }
 
         async function exportFilteredSchools(status, filenamePrefix) {
-            let block = 'ALL';
-            if (status === 'ZERO') block = document.getElementById('zeroBlockFilter').value;
-            if (status === 'PENDING') block = document.getElementById('pendingBlockFilter').value;
-            if (status === 'COMPLETED') block = document.getElementById('completedBlockFilter').value;
-
-            const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&export=1`;
-            const res = await fetch(url);
-            const json = await res.json();
-
-            if (json.success && json.records) {
-                const ws = XLSX.utils.json_to_sheet(json.records);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Schools");
-                XLSX.writeFile(wb, `${filenamePrefix}_${formatDMY(APP.currentDate)}.xlsx`);
+            const records = await getFilteredRecordsForExport(status);
+            if (!records || records.length === 0) {
+                alert('No records available to export.');
+                return;
             }
+            const ws = XLSX.utils.json_to_sheet(records);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Schools");
+            XLSX.writeFile(wb, `${filenamePrefix}_${formatDMY(APP.currentDate)}.xlsx`);
         }
 
         /* ==========================================================================
@@ -1505,196 +1781,224 @@
             const limit = APP.schoolsPagination.limit;
             const offset = APP.schoolsPagination.offset;
 
-            try {
-                const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`;
-                const res = await fetch(url);
-                const json = await res.json();
+            let records = [];
+            let totalCount = 0;
 
-                if (json.success) {
-                    APP.schoolsPagination.total = json.totalCount;
-                    const start = json.totalCount > 0 ? offset + 1 : 0;
-                    const end = Math.min(offset + limit, json.totalCount);
-                    document.getElementById('schoolsPaginationInfo').innerText = `Showing ${start} to ${end} of ${json.totalCount.toLocaleString()} schools`;
-                    document.getElementById('schoolsCurrentPageNum').innerText = Math.floor(offset / limit) + 1;
-
-                    document.getElementById('btnPrevPage').disabled = offset <= 0;
-                    document.getElementById('btnNextPage').disabled = offset + limit >= json.totalCount;
-
-                    tbody.innerHTML = '';
-                    if (json.records.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-slate-400">No schools matching your search.</td></tr>';
-                        return;
+            if (!APP.useLocalDB) {
+                try {
+                    const url = `api/get_schools.php?date=${APP.currentDate}&status=${status}&block=${encodeURIComponent(block)}&search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`;
+                    const res = await fetch(url);
+                    const json = await res.json();
+                    if (json.success) {
+                        records = json.records || [];
+                        totalCount = json.totalCount || 0;
                     }
+                } catch (e) {}
+            }
 
-                    json.records.forEach((s, idx) => {
-                        const tr = document.createElement('tr');
-                        tr.className = 'hover:bg-slate-50 transition';
+            if (records.length === 0 && totalCount === 0) {
+                const res = await IDB.getSchools({
+                    date: APP.currentDate,
+                    status,
+                    block,
+                    search,
+                    limit,
+                    offset
+                });
+                records = res.records;
+                totalCount = res.totalCount;
+            }
 
-                        const badge = s.status === 'COMPLETED' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">100% Completed</span>' :
-                                      (s.status === 'ZERO' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">0% Not Started</span>' :
-                                                             '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">Pending</span>');
+            APP.schoolsPagination.total = totalCount;
+            const start = totalCount > 0 ? offset + 1 : 0;
+            const end = Math.min(offset + limit, totalCount);
+            document.getElementById('schoolsPaginationInfo').innerText = `Showing ${start} to ${end} of ${totalCount.toLocaleString()} schools`;
+            document.getElementById('schoolsCurrentPageNum').innerText = Math.floor(offset / limit) + 1;
 
-                        tr.innerHTML = `
-                            <td class="py-2.5 px-3 text-slate-400 font-semibold">${offset + idx + 1}</td>
-                            <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
-                            <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
-                            <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
-                            <td class="py-2.5 px-3 text-right font-semibold text-slate-600">${s.total_teachers}</td>
-                            <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
-                            <td class="py-2.5 px-3 text-right font-semibold text-slate-500">${s.pending_teachers}</td>
-                            <td class="py-2.5 px-3 text-center">
-                                <span class="font-bold ${s.onboarded_pct >= 100 ? 'text-emerald-600' : (s.onboarded_pct === 0 ? 'text-red-600' : 'text-amber-700')}">
-                                    ${s.onboarded_pct}%
-                                </span>
-                            </td>
-                            <td class="py-2.5 px-3 text-center">${badge}</td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
-                }
-            } catch (err) {
-                console.error(err);
+            document.getElementById('btnPrevPage').disabled = offset <= 0;
+            document.getElementById('btnNextPage').disabled = offset + limit >= totalCount;
+
+            tbody.innerHTML = '';
+            if (records.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-slate-400">No schools matching your search.</td></tr>';
+                return;
+            }
+
+            records.forEach((s, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition';
+
+                const badge = s.status === 'COMPLETED' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">100% Completed</span>' :
+                              (s.status === 'ZERO' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">0% Not Started</span>' :
+                                                     '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">Pending</span>');
+
+                const pendingTeachers = s.total_teachers - s.teachers_onboarded;
+                tr.innerHTML = `
+                    <td class="py-2.5 px-3 text-slate-400 font-semibold">${offset + idx + 1}</td>
+                    <td class="py-2.5 px-3 font-semibold text-slate-700">${s.block_name}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-900">${s.school_name}</td>
+                    <td class="py-2.5 px-3 font-mono text-slate-500">${s.udise_code}</td>
+                    <td class="py-2.5 px-3 text-right font-medium text-slate-600">${s.total_teachers}</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-slate-800">${s.teachers_onboarded}</td>
+                    <td class="py-2.5 px-3 text-right font-black text-amber-700">${pendingTeachers}</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <div class="flex items-center justify-center space-x-1.5">
+                            <div class="w-14 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div class="bg-blue-600 h-full rounded-full" style="width: ${s.onboarded_pct}%"></div>
+                            </div>
+                            <span class="text-[11px] font-bold text-slate-800">${s.onboarded_pct}%</span>
+                        </div>
+                    </td>
+                    <td class="py-2.5 px-3 text-center">${badge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function changeSchoolsPage(delta) {
+            const newOffset = APP.schoolsPagination.offset + (delta * APP.schoolsPagination.limit);
+            if (newOffset >= 0 && newOffset < APP.schoolsPagination.total) {
+                APP.schoolsPagination.offset = newOffset;
+                loadAllSchoolsDirectory();
             }
         }
 
-        function changeSchoolsPage(dir) {
-            APP.schoolsPagination.offset = Math.max(0, APP.schoolsPagination.offset + (dir * APP.schoolsPagination.limit));
-            loadAllSchoolsDirectory();
+        /* ==========================================================================
+           MODAL: EXCEL IMPORT & DRAG AND DROP
+           ========================================================================== */
+        function openUploadModal() {
+            document.getElementById('uploadModal').classList.remove('hidden');
         }
 
-        /* ==========================================================================
-           MODAL: EXCEL IMPORT & DROPZONE
-           ========================================================================== */
-        const uploadModal = document.getElementById('uploadModal');
-        const fileInput = document.getElementById('fileInput');
-        const dropzone = document.getElementById('dropzone');
-        const uploadStatus = document.getElementById('uploadStatus');
-
-        document.getElementById('btnOpenUpload').addEventListener('click', () => {
-            uploadModal.classList.remove('hidden');
-        });
-
         function closeUploadModal() {
-            uploadModal.classList.add('hidden');
-            uploadStatus.classList.add('hidden');
+            document.getElementById('uploadModal').classList.add('hidden');
+            document.getElementById('uploadStatus').innerText = '';
         }
 
         function setupDropzone() {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('fileInput');
+
             dropzone.addEventListener('click', () => fileInput.click());
-            dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-blue-600', 'bg-blue-100/50'); });
-            dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('border-blue-600', 'bg-blue-100/50'); });
+            dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-emerald-500'); });
+            dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-emerald-500'));
             dropzone.addEventListener('drop', (e) => {
                 e.preventDefault();
-                dropzone.classList.remove('border-blue-600', 'bg-blue-100/50');
-                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    handleExcelFiles(e.dataTransfer.files);
-                }
+                dropzone.classList.remove('border-emerald-500');
+                if (e.dataTransfer.files.length > 0) handleExcelFiles(e.dataTransfer.files);
             });
+
             fileInput.addEventListener('change', (e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                    handleExcelFiles(e.target.files);
-                }
+                if (e.target.files.length > 0) handleExcelFiles(e.target.files);
             });
         }
 
-        async function handleExcelFiles(files) {
-            uploadStatus.classList.remove('hidden');
-            uploadStatus.className = 'mt-3 text-center text-xs font-semibold text-blue-600';
+        async function handleExcelFiles(fileList) {
+            const uploadStatus = document.getElementById('uploadStatus');
+            uploadStatus.className = 'mt-3 text-center text-xs font-bold text-blue-600';
+            uploadStatus.innerText = 'Parsing Excel data...';
 
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                uploadStatus.innerText = `Parsing ${file.name}...`;
-
+            for (const file of fileList) {
                 try {
                     const data = await file.arrayBuffer();
                     const workbook = XLSX.read(data, { type: 'array' });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
-                    const jsonRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-                    if (jsonRows.length < 2) {
-                        throw new Error(`File ${file.name} is empty or missing headers.`);
+                    if (!rawRows || rawRows.length < 2) throw new Error('File has no valid data rows');
+
+                    let headerRowIndex = 0;
+                    for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
+                        const rowStr = (rawRows[i] || []).join(' ').toLowerCase();
+                        if (rowStr.includes('school') || rowStr.includes('teacher') || rowStr.includes('block')) {
+                            headerRowIndex = i;
+                            break;
+                        }
                     }
 
-                    let extractedDate = '';
-                    const dmyMatch = file.name.match(/(\d{2}-\d{2}-\d{4})/);
-                    const ymdMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
-                    if (dmyMatch) {
-                        extractedDate = dmyMatch[1];
-                    } else if (ymdMatch) {
-                        extractedDate = formatDMY(ymdMatch[1]);
-                    } else {
-                        extractedDate = document.getElementById('inputDateOverride').value || getTodayDMY();
-                    }
-                    extractedDate = formatDMY(extractedDate);
-
-                    const headers = jsonRows[0].map(h => String(h || '').trim().toLowerCase());
+                    const headers = (rawRows[headerRowIndex] || []).map(h => String(h || '').trim().toLowerCase());
                     const blockCol = headers.findIndex(h => h.includes('block'));
                     const schoolCol = headers.findIndex(h => h.includes('school') || h.includes('udise'));
-                    const totalCol = headers.findIndex(h => h.includes('total teacher'));
-                    const onboardedCol = headers.findIndex(h => h.includes('teacher') && h.includes('onboard') && !h.includes('%'));
+                    const totalCol = headers.findIndex(h => h.includes('total') && h.includes('teacher'));
+                    const onboardedCol = headers.findIndex(h => h.includes('onboard') && !h.includes('%'));
+
+                    let extractedDate = '';
+                    const dmyMatch = file.name.match(/(\d{1,2}-\d{1,2}-\d{4})/);
+                    const ymdMatch = file.name.match(/(\d{4}-\d{1,2}-\d{1,2})/);
+                    if (dmyMatch) extractedDate = dmyMatch[1];
+                    else if (ymdMatch) extractedDate = formatDMY(ymdMatch[1]);
+                    else extractedDate = document.getElementById('inputDateOverride').value || getTodayDMY();
+
+                    extractedDate = formatDMY(extractedDate);
+                    const isoDate = parseToISO(extractedDate);
 
                     const parsedRecords = [];
-                    let totTeachers = 0, totOnboarded = 0, compCnt = 0, zeroCnt = 0, pendCnt = 0;
+                    let teachersOnboardedTotal = 0;
+                    let totalTeachersSum = 0;
+                    let schoolsCompletedCount = 0;
+                    let schoolsZeroCount = 0;
+                    let schoolsPendingCount = 0;
                     const blocksSet = new Set();
 
-                    for (let r = 1; r < jsonRows.length; r++) {
-                        const row = jsonRows[r];
+                    for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+                        const row = rawRows[r];
                         if (!row || row.length === 0) continue;
-                        if (String(row[0] || '').toUpperCase() === 'TOTAL') continue;
+                        if (String(row[0] || '').toUpperCase().includes('TOTAL')) continue;
 
-                        const blockName = blockCol >= 0 ? String(row[blockCol] || '').trim() : 'UNKNOWN';
+                        const rawSchool = schoolCol >= 0 ? String(row[schoolCol] || '').trim() : '';
+                        if (!rawSchool) continue;
+
+                        const parts = rawSchool.split('|');
+                        const schoolName = parts[0].trim();
+                        const udiseCode = parts[1] ? parts[1].trim() : '';
+
+                        const blockName = blockCol >= 0 ? String(row[blockCol] || 'UNKNOWN').trim() : 'UNKNOWN';
                         blocksSet.add(blockName);
-                        const schoolWithUdise = schoolCol >= 0 ? String(row[schoolCol] || '').trim() : '';
+
                         const totalTeachers = totalCol >= 0 ? parseInt(row[totalCol], 10) || 0 : 0;
                         const teachersOnboarded = onboardedCol >= 0 ? parseInt(row[onboardedCol], 10) || 0 : 0;
-
-                        if (!schoolWithUdise) continue;
-
-                        const parts = schoolWithUdise.split('|');
-                        const sName = parts[0].trim();
-                        const uCode = parts[1] ? parts[1].trim() : '';
                         const pct = totalTeachers > 0 ? parseFloat(((teachersOnboarded / totalTeachers) * 100).toFixed(2)) : 0;
 
                         let status = 'PENDING';
-                        if (teachersOnboarded === 0) { status = 'ZERO'; zeroCnt++; }
-                        else if (teachersOnboarded >= totalTeachers && totalTeachers > 0) { status = 'COMPLETED'; compCnt++; }
-                        else { status = 'PENDING'; pendCnt++; }
+                        if (teachersOnboarded === 0) { status = 'ZERO'; schoolsZeroCount++; }
+                        else if (totalTeachers > 0 && teachersOnboarded >= totalTeachers) { status = 'COMPLETED'; schoolsCompletedCount++; }
+                        else { schoolsPendingCount++; }
 
-                        totTeachers += totalTeachers;
-                        totOnboarded += teachersOnboarded;
+                        totalTeachersSum += totalTeachers;
+                        teachersOnboardedTotal += teachersOnboarded;
 
                         parsedRecords.push({
-                            snapshot_date: extractedDate,
-                            s_no: r,
+                            snapshot_date: isoDate,
+                            s_no: parsedRecords.length + 1,
                             block_name: blockName,
-                            school_name: sName,
-                            udise_code: uCode,
+                            school_name: schoolName,
+                            udise_code: udiseCode,
                             total_teachers: totalTeachers,
                             teachers_onboarded: teachersOnboarded,
                             onboarded_pct: pct,
-                            status
+                            status: status
                         });
                     }
 
-                    uploadStatus.innerText = `Saving ${parsedRecords.length} schools for ${extractedDate}...`;
-
-                    const overallPct = totTeachers > 0 ? parseFloat(((totOnboarded / totTeachers) * 100).toFixed(2)) : 0;
+                    const overallPct = totalTeachersSum > 0 ? parseFloat(((teachersOnboardedTotal / totalTeachersSum) * 100).toFixed(2)) : 0;
                     const snapObj = {
-                        report_date: extractedDate,
+                        report_date: isoDate,
                         report_title: 'Teacher Onboarding',
                         total_blocks: blocksSet.size,
                         total_schools: parsedRecords.length,
-                        total_teachers: totTeachers,
-                        teachers_onboarded: totOnboarded,
+                        total_teachers: totalTeachersSum,
+                        teachers_onboarded: teachersOnboardedTotal,
                         onboarded_pct: overallPct,
-                        schools_completed: compCnt,
-                        schools_zero: zeroCnt,
-                        schools_pending: pendCnt
+                        schools_completed: schoolsCompletedCount,
+                        schools_zero: schoolsZeroCount,
+                        schools_pending: schoolsPendingCount,
+                        created_at: new Date().toISOString()
                     };
 
+                    uploadStatus.innerText = `Saving ${parsedRecords.length} schools for ${extractedDate}...`;
+
                     // Try saving to PHP API
-                    let apiSucceeded = false;
                     try {
                         const payload = {
                             reportDate: extractedDate,
@@ -1706,28 +2010,24 @@
                                 teachersOnboarded: p.teachers_onboarded
                             }))
                         };
-                        const res = await fetch('api/save_snapshot.php', {
+                        await fetch('api/save_snapshot.php', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        const resJson = await res.json();
-                        if (resJson.success) apiSucceeded = true;
-                    } catch (e) {
-                        console.warn('API save skipped, saving in IndexedDB');
-                    }
+                    } catch (e) {}
 
-                    // Always also save in local IndexedDB for offline capability
+                    // Save in local IndexedDB for 100% offline & GitHub Pages capability
                     await IDB.saveSnapshot(snapObj, parsedRecords);
 
                 } catch (err) {
-                    uploadStatus.className = 'mt-3 text-center text-xs font-semibold text-red-600';
+                    uploadStatus.className = 'mt-3 text-center text-xs font-bold text-red-600';
                     uploadStatus.innerText = `Error: ${err.message}`;
                     return;
                 }
             }
 
-            uploadStatus.className = 'mt-3 text-center text-xs font-semibold text-emerald-600';
+            uploadStatus.className = 'mt-3 text-center text-xs font-bold text-emerald-600';
             uploadStatus.innerText = 'All files imported successfully!';
             setTimeout(async () => {
                 closeUploadModal();
@@ -1736,13 +2036,409 @@
         }
 
         /* ==========================================================================
-           PWA SERVICE WORKER & MOBILE INSTALL PROMPT
+           OFFICIAL PDF EXPORT ENGINE (jsPDF + AUTOTABLE PLUGIN)
+           ========================================================================== */
+        function showPdfToast(text = 'Generating PDF report, please wait...') {
+            const toast = document.getElementById('pdfToast');
+            document.getElementById('pdfToastText').innerText = text;
+            toast.classList.remove('hidden');
+        }
+
+        function hidePdfToast() {
+            document.getElementById('pdfToast').classList.add('hidden');
+        }
+
+        function getPdfBaseDoc(orientation = 'landscape') {
+            if (!window.jspdf || !window.jspdf.jsPDF) {
+                alert('PDF generation library is still loading. Please try again in 5 seconds.');
+                return null;
+            }
+            const { jsPDF } = window.jspdf;
+            return new jsPDF({
+                orientation: orientation,
+                unit: 'mm',
+                format: 'a4'
+            });
+        }
+
+        function drawPdfHeader(doc, reportTitle, reportDate, orientation = 'landscape') {
+            const pageWidth = doc.internal.pageSize.getWidth();
+
+            // Official Navy Top Banner
+            doc.setFillColor(30, 58, 138); // #1e3a8a
+            doc.rect(0, 0, pageWidth, 22, 'F');
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.text('SSM, Purba Bardhaman', 14, 9.5);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.text('PRASHAST PORTAL • TEACHER ONBOARDING MONITORING & ANALYTICS', 14, 15.5);
+
+            doc.setFontSize(8.5);
+            doc.text(`District Monitoring Portal`, pageWidth - 14, 9.5, { align: 'right' });
+            doc.text(`Report Date: ${reportDate || formatDMY(APP.currentDate)}`, pageWidth - 14, 15.5, { align: 'right' });
+
+            // Report Title
+            doc.setTextColor(15, 23, 42); // slate-900
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.text(reportTitle.toUpperCase(), 14, 30);
+
+            const printTime = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(8);
+            doc.setTextColor(100, 116, 139); // slate-500
+            doc.text(`Generated on: ${printTime} IST | Official District Monitoring Report`, 14, 34);
+
+            doc.setDrawColor(37, 99, 235);
+            doc.setLineWidth(0.5);
+            doc.line(14, 36, pageWidth - 14, 36);
+
+            return 40;
+        }
+
+        function drawPdfFooter(doc) {
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+
+                doc.setDrawColor(226, 232, 240);
+                doc.setLineWidth(0.3);
+                doc.line(14, pageHeight - 9, pageWidth - 14, pageHeight - 9);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7.5);
+                doc.setTextColor(148, 163, 184);
+                doc.text('SSM, Purba Bardhaman • PRASHAST Portal - For Official Administrative & Monitoring Use Only', 14, pageHeight - 5);
+                doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 5, { align: 'right' });
+            }
+        }
+
+        // 1. Executive Overview PDF (Portrait)
+        async function exportExecutiveOverviewPDF() {
+            showPdfToast('Generating Executive Overview PDF...');
+            setTimeout(() => {
+                try {
+                    const doc = getPdfBaseDoc('portrait');
+                    if (!doc) return hidePdfToast();
+
+                    const dateStr = formatDMY(APP.currentDate);
+                    let startY = drawPdfHeader(doc, 'Executive District Overview & Performance KPIs', dateStr, 'portrait');
+
+                    // District Summary Table
+                    const snap = APP.dashboardData?.snapshot || (APP.availableDates.find(d => d.report_date === APP.currentDate)) || {};
+                    const pendingTeachers = (snap.total_teachers || 0) - (snap.teachers_onboarded || 0);
+
+                    doc.autoTable({
+                        startY: startY,
+                        head: [['District KPI Indicator', 'Current Value', 'District Coverage / Rate']],
+                        body: [
+                            ['Total Schools in District', Number(snap.total_schools || 0).toLocaleString(), '100%'],
+                            ['Total Registered Teachers', Number(snap.total_teachers || 0).toLocaleString(), '100%'],
+                            ['Teachers Onboarded', Number(snap.teachers_onboarded || 0).toLocaleString(), `${snap.onboarded_pct || 0}% Completion`],
+                            ['Remaining Teachers Pending', Number(pendingTeachers).toLocaleString(), `${(100 - (snap.onboarded_pct || 0)).toFixed(2)}% Pending`],
+                            ['100% Completed Schools', Number(snap.schools_completed || 0).toLocaleString(), `${((snap.schools_completed || 0) / (snap.total_schools || 1) * 100).toFixed(1)}% of schools`],
+                            ['Pending Onboarding Schools (1-99%)', Number(snap.schools_pending || 0).toLocaleString(), `${((snap.schools_pending || 0) / (snap.total_schools || 1) * 100).toFixed(1)}% of schools`],
+                            ['Not Started Schools (0% Onboarded)', Number(snap.schools_zero || 0).toLocaleString(), `${((snap.schools_zero || 0) / (snap.total_schools || 1) * 100).toFixed(1)}% (Urgent Action)`]
+                        ],
+                        theme: 'striped',
+                        headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+                        styles: { fontSize: 8.5, cellPadding: 2.2 },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    // Top 5 Leading Blocks Table
+                    const leadingBlocks = (APP.blocksData || []).slice(0, 5).map((b, i) => [
+                        i + 1,
+                        b.block_name,
+                        b.total_schools,
+                        b.total_teachers,
+                        b.teachers_onboarded,
+                        `${b.onboarded_pct}%`
+                    ]);
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    doc.setTextColor(16, 185, 129); // emerald-600
+                    doc.text('TOP 5 LEADING BLOCKS (HIGHEST COMPLETION)', 14, doc.lastAutoTable.finalY + 8);
+
+                    doc.autoTable({
+                        startY: doc.lastAutoTable.finalY + 10,
+                        head: [['#', 'Block Name', 'Schools', 'Teachers', 'Onboarded', 'Onboarded (%)']],
+                        body: leadingBlocks,
+                        theme: 'striped',
+                        headStyles: { fillColor: [5, 150, 105], textColor: 255 },
+                        styles: { fontSize: 8, cellPadding: 2 },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    // Top 5 Lagging Blocks Table
+                    const laggingBlocks = [...(APP.blocksData || [])].slice(-5).reverse().map((b, i) => [
+                        i + 1,
+                        b.block_name,
+                        b.total_schools,
+                        b.total_teachers,
+                        b.teachers_onboarded,
+                        b.pending_teachers,
+                        `${b.onboarded_pct}%`
+                    ]);
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    doc.setTextColor(220, 38, 38); // red-600
+                    doc.text('TOP 5 LAGGING BLOCKS (REQUIRES URGENT INTERVENTION)', 14, doc.lastAutoTable.finalY + 8);
+
+                    doc.autoTable({
+                        startY: doc.lastAutoTable.finalY + 10,
+                        head: [['#', 'Block Name', 'Schools', 'Teachers', 'Onboarded', 'Pending', 'Onboarded (%)']],
+                        body: laggingBlocks,
+                        theme: 'striped',
+                        headStyles: { fillColor: [220, 38, 38], textColor: 255 },
+                        styles: { fontSize: 8, cellPadding: 2 },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    drawPdfFooter(doc);
+                    doc.save(`Prashast_Executive_Overview_${dateStr}.pdf`);
+                } catch (e) {
+                    alert('PDF generation error: ' + e.message);
+                } finally {
+                    hidePdfToast();
+                }
+            }, 100);
+        }
+
+        // 2. Block-Wise Performance PDF (Landscape)
+        function exportBlocksPDF() {
+            showPdfToast('Generating Block-Wise PDF...');
+            setTimeout(() => {
+                try {
+                    const doc = getPdfBaseDoc('landscape');
+                    if (!doc) return hidePdfToast();
+
+                    const dateStr = formatDMY(APP.currentDate);
+                    let startY = drawPdfHeader(doc, 'Block-Wise Teacher Onboarding Performance Report', dateStr, 'landscape');
+
+                    const rows = (APP.blocksData || []).map((b, i) => [
+                        i + 1,
+                        b.block_name,
+                        b.total_schools,
+                        b.total_teachers,
+                        b.teachers_onboarded,
+                        b.pending_teachers,
+                        `${b.onboarded_pct}%`,
+                        b.schools_completed,
+                        b.schools_zero
+                    ]);
+
+                    // District Totals
+                    const totalSchools = APP.blocksData.reduce((acc, b) => acc + (b.total_schools || 0), 0);
+                    const totalTeachers = APP.blocksData.reduce((acc, b) => acc + (b.total_teachers || 0), 0);
+                    const totalOnboarded = APP.blocksData.reduce((acc, b) => acc + (b.teachers_onboarded || 0), 0);
+                    const totalPending = APP.blocksData.reduce((acc, b) => acc + (b.pending_teachers || 0), 0);
+                    const totalComp = APP.blocksData.reduce((acc, b) => acc + (b.schools_completed || 0), 0);
+                    const totalZero = APP.blocksData.reduce((acc, b) => acc + (b.schools_zero || 0), 0);
+                    const grandPct = totalTeachers > 0 ? ((totalOnboarded / totalTeachers) * 100).toFixed(2) + '%' : '0%';
+
+                    rows.push([
+                        'TOTAL',
+                        `All ${APP.blocksData.length} Blocks`,
+                        totalSchools,
+                        totalTeachers,
+                        totalOnboarded,
+                        totalPending,
+                        grandPct,
+                        totalComp,
+                        totalZero
+                    ]);
+
+                    doc.autoTable({
+                        startY: startY,
+                        head: [['#', 'Block Name', 'Schools', 'Total Teachers', 'Onboarded', 'Pending', 'Onboarded (%)', '100% Schools', '0% Schools']],
+                        body: rows,
+                        theme: 'striped',
+                        headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+                        styles: { fontSize: 8, cellPadding: 1.8 },
+                        columnStyles: {
+                            0: { cellWidth: 10, halign: 'center' },
+                            1: { fontStyle: 'bold' },
+                            2: { halign: 'right' },
+                            3: { halign: 'right' },
+                            4: { halign: 'right', fontStyle: 'bold', textColor: [5, 150, 105] },
+                            5: { halign: 'right', fontStyle: 'bold', textColor: [217, 119, 6] },
+                            6: { halign: 'center', fontStyle: 'bold' },
+                            7: { halign: 'center', textColor: [5, 150, 105] },
+                            8: { halign: 'center', textColor: [220, 38, 38] }
+                        },
+                        didParseCell: function(data) {
+                            if (data.row.index === rows.length - 1) {
+                                data.cell.styles.fontStyle = 'bold';
+                                data.cell.styles.fillColor = [241, 245, 249];
+                            }
+                        },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    drawPdfFooter(doc);
+                    doc.save(`Prashast_Block_Performance_${dateStr}.pdf`);
+                } catch (e) {
+                    alert('PDF generation error: ' + e.message);
+                } finally {
+                    hidePdfToast();
+                }
+            }, 100);
+        }
+
+        // 3. Day-Wise Comparison PDF (Landscape)
+        function exportComparisonPDF() {
+            showPdfToast('Generating Comparison PDF...');
+            setTimeout(() => {
+                try {
+                    const doc = getPdfBaseDoc('landscape');
+                    if (!doc) return hidePdfToast();
+
+                    const date1 = document.getElementById('compareDate1').value;
+                    const date2 = document.getElementById('compareDate2').value;
+                    const date1Str = formatDMY(date1);
+                    const date2Str = formatDMY(date2);
+
+                    let startY = drawPdfHeader(doc, `Day-over-Day Comparison: ${date1Str} vs ${date2Str}`, `${date1Str} vs ${date2Str}`, 'landscape');
+
+                    const rows = [];
+                    const trs = document.querySelectorAll('#blockComparisonTableBody tr');
+                    trs.forEach((tr, i) => {
+                        const tds = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
+                        if (tds.length >= 8) {
+                            rows.push([
+                                i + 1,
+                                tds[0], // Block Name
+                                tds[1], // Total Teachers
+                                tds[2], // Date 1 Onboarded
+                                tds[3], // Date 2 Onboarded
+                                tds[4], // Net Added
+                                tds[5], // Date 1 %
+                                tds[6], // Date 2 %
+                                tds[7]  // Growth %
+                            ]);
+                        }
+                    });
+
+                    doc.autoTable({
+                        startY: startY,
+                        head: [['#', 'Block Name', 'Total Teachers', `${date1Str} Onboarded`, `${date2Str} Onboarded`, 'Net Added', `${date1Str} %`, `${date2Str} %`, 'Growth %']],
+                        body: rows,
+                        theme: 'striped',
+                        headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+                        styles: { fontSize: 8, cellPadding: 1.8 },
+                        columnStyles: {
+                            0: { cellWidth: 10, halign: 'center' },
+                            1: { fontStyle: 'bold' },
+                            2: { halign: 'right' },
+                            3: { halign: 'right' },
+                            4: { halign: 'right', fontStyle: 'bold' },
+                            5: { halign: 'right', fontStyle: 'bold', textColor: [5, 150, 105] },
+                            6: { halign: 'right' },
+                            7: { halign: 'right', fontStyle: 'bold' },
+                            8: { halign: 'right', fontStyle: 'bold', textColor: [37, 99, 235] }
+                        },
+                        margin: { left: 14, right: 14 }
+                    });
+
+                    drawPdfFooter(doc);
+                    doc.save(`Prashast_Comparison_${date1Str}_vs_${date2Str}.pdf`);
+                } catch (e) {
+                    alert('PDF generation error: ' + e.message);
+                } finally {
+                    hidePdfToast();
+                }
+            }, 100);
+        }
+
+        // 4. Categorized Schools & Directory PDF (Landscape)
+        async function exportSchoolsPDF(status, filenamePrefix) {
+            showPdfToast('Compiling Schools PDF...');
+            try {
+                const records = await getFilteredRecordsForExport(status);
+                if (!records || records.length === 0) {
+                    hidePdfToast();
+                    alert('No records available to export.');
+                    return;
+                }
+
+                setTimeout(() => {
+                    try {
+                        const doc = getPdfBaseDoc('landscape');
+                        if (!doc) return hidePdfToast();
+
+                        const dateStr = formatDMY(APP.currentDate);
+                        let title = 'District School Performance Directory';
+                        if (status === 'ZERO') title = 'URGENT ACTION LIST: SCHOOLS WITH 0% TEACHER ONBOARDING';
+                        if (status === 'PENDING') title = 'IN-PROGRESS SCHOOLS (1% - 99% TEACHER ONBOARDING)';
+                        if (status === 'COMPLETED') title = 'HALL OF FAME: 100% FULLY ONBOARDED SCHOOLS';
+
+                        let startY = drawPdfHeader(doc, title, dateStr, 'landscape');
+
+                        const rows = records.map((s, i) => [
+                            i + 1,
+                            s.block_name,
+                            s.school_name,
+                            s.udise_code,
+                            s.total_teachers,
+                            s.teachers_onboarded,
+                            (s.total_teachers - s.teachers_onboarded),
+                            `${s.onboarded_pct}%`,
+                            s.status
+                        ]);
+
+                        doc.autoTable({
+                            startY: startY,
+                            head: [['#', 'Block Name', 'School Name', 'UDISE Code', 'Total Teachers', 'Onboarded', 'Pending', 'Onboarded (%)', 'Status']],
+                            body: rows,
+                            theme: 'striped',
+                            headStyles: { fillColor: status === 'ZERO' ? [220, 38, 38] : (status === 'COMPLETED' ? [5, 150, 105] : [30, 58, 138]), textColor: 255, fontStyle: 'bold' },
+                            styles: { fontSize: 7.5, cellPadding: 1.5 },
+                            columnStyles: {
+                                0: { cellWidth: 10, halign: 'center' },
+                                1: { fontStyle: 'bold', cellWidth: 32 },
+                                2: { cellWidth: 75, fontStyle: 'bold' },
+                                3: { cellWidth: 26, fontStyle: 'normal' },
+                                4: { halign: 'right', cellWidth: 22 },
+                                5: { halign: 'right', cellWidth: 22 },
+                                6: { halign: 'right', cellWidth: 20, fontStyle: 'bold' },
+                                7: { halign: 'center', cellWidth: 24, fontStyle: 'bold' },
+                                8: { halign: 'center', cellWidth: 26 }
+                            },
+                            margin: { left: 14, right: 14 }
+                        });
+
+                        drawPdfFooter(doc);
+                        doc.save(`${filenamePrefix}_${dateStr}.pdf`);
+                    } catch (e) {
+                        alert('PDF generation error: ' + e.message);
+                    } finally {
+                        hidePdfToast();
+                    }
+                }, 100);
+
+            } catch (err) {
+                hidePdfToast();
+                alert('Export failed: ' + err.message);
+            }
+        }
+
+        /* ==========================================================================
+           PWA SERVICE WORKER & MOBILE INSTALLATION
            ========================================================================== */
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Prashast PWA Service Worker Registered', reg))
-                    .catch(err => console.log('Service Worker registration skipped:', err));
+                    .then(reg => console.log('Prashast Mobile Service Worker Ready', reg))
+                    .catch(err => console.log('Service Worker skipped:', err));
             });
         }
 
@@ -1759,7 +2455,7 @@
                 deferredPrompt.prompt();
                 deferredPrompt.userChoice.then((choiceResult) => {
                     if (choiceResult.outcome === 'accepted') {
-                        console.log('User installed Prashast Mobile App');
+                        console.log('Prashast App Installed');
                     }
                     deferredPrompt = null;
                     const banner = document.getElementById('pwaInstallBanner');
@@ -1770,4 +2466,3 @@
     </script>
 </body>
 </html>
-
