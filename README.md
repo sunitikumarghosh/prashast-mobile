@@ -5,6 +5,7 @@ switched at the top of the side menu:
 
 - **Teacher Onboarding**: teachers onboarded per school (Total Teachers / Teachers Onboarded).
 - **School Onboarding**: whether each school has completed onboarding (Status: Completed / Pending).
+- **Screening (Part-1)**: per school, onboarding, whether screening has started, total students and students screened.
 It is a static site: no server or database is needed, and it runs on **GitHub Pages**.
 
 ## Features
@@ -32,6 +33,19 @@ The **School Onboarding** module has the same pages, using schools instead of te
 | Daily Trend | District summary for every date, plus a block × date matrix (%, onboarded, pending) |
 | Management / Category | School onboarding by Management, Category or School Type, with a block × group matrix |
 
+The **Screening (Part-1)** module has the same pages. Its main measure is the % of students screened. Each school is also put in a stage:
+*Not onboarded* → *Onboarded, not started* → *Screening started* → *All students screened*.
+
+| Page | What it shows |
+|---|---|
+| Dashboard | Students screened %, total / screened students, schools onboarded and screening started, schools per stage, highlights, charts, trend, top/bottom 5 blocks |
+| Block-wise Status | Schools, onboarded, screening started, students, screened, not screened, %, daily change, Leading / Moderate / Lagging |
+| Leading & Lagging | Top / bottom 10 blocks, top gainers, least progress, most onboarded schools not started, most students not screened, large schools not started / not onboarded |
+| School lists | All / not onboarded / onboarded but not started / screening started / all students screened, with block, Management, Category and Type filters |
+| Day-wise Comparison | Block-wise change, plus schools where screening newly started, newly onboarded, more students screened, still not started, still not onboarded |
+| Daily Trend | District summary for every date and a block × date matrix |
+| Management / Category | Screening by Management, Category or School Type, with a block × group matrix |
+
 ## School master (Management / Category / Type)
 
 The Management / Category reports, the Management and Category columns in school lists, and the matching filters
@@ -55,7 +69,9 @@ The layout works on phones, tablets and desktops.
      `Teacher_Onboarding_School_Wise_All_Blocks_YYYY-MM-DD.xlsx`.
    - `prashast-schools-onboarding-all-blocks.user.js` on *Schools Onboarding Status | Block Wise Report*. It downloads
      `Schools_Onboarding_Status_All_Blocks_YYYY-MM-DD.xlsx`.
-2. Open the portal and go to **Upload / Manage Data**, then upload the file(s). The module (teacher or school) is detected from the columns.
+   - `prashast-screening-part1-all-blocks.user.js` on *Schools Screening Status [Part-1] | Block Wise Report*. It downloads
+     `Schools_Screening_Status_Part1_All_Blocks_YYYY-MM-DD.xlsx`.
+2. Open the portal and go to **Upload / Manage Data**, then upload the file(s). The module (teacher, school or screening) is detected from the columns.
    The date is read from the file name. If the name has no date, choose one in the *Data date* box.
 3. Uploading again for the same date replaces that day's data.
 
@@ -95,6 +111,7 @@ So that every officer who opens the link sees the full history without uploading
 The first sheet that has a **School Name** column is used. The other columns are found by name:
 - Teacher Onboarding: `Block Name`, `School Name`, `UDISE Code`, `Total Teachers`, `Teachers Onboarded`.
 - School Onboarding: `Block Name`, `School Name`, `UDISE Code`, `Status` (`Completed` counts as onboarded, anything else as pending).
+- Screening (Part-1): `Block Name`, `School Name`, `UDISE Code`, `Schools Onboarded` (`On-boarded` / `Pending`), `Screening Started` (`Not Started` = not started), `Total Students`, `Screened Students`.
 
 The portal's own format `School Name | UDISE` in one column also works. Percentages are recalculated from the counts.
 

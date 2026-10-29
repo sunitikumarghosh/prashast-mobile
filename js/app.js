@@ -7,14 +7,19 @@
 
 const HEADER = 'Prashast On boarding status :: SSM, Purba Bardhaman';
 const CREDIT = 'An in-house production of SSM, Purba Bardhaman';
-const CAT = { full: '100%', part: '1-99%', zero: '0%', na: 'No teachers', done: 'Completed', pending: 'Pending' };
+const CAT = {
+    full: '100%', part: '1-99%', zero: '0%', na: 'No teachers', done: 'Completed', pending: 'Pending',
+    // screening stages of a school
+    notonb: 'Not onboarded', onb: 'Onboarded, not started', scr: 'Screening started', scrfull: 'All students screened',
+};
 const NUM_TYPES = new Set(['idx', 'n', 'p', 'd', 'dp']);
-const MODS = { teacher: 'Teacher Onboarding', school: 'School Onboarding' };
+const MODS = { teacher: 'Teacher Onboarding', school: 'School Onboarding', screening: 'Screening Part-1' };
+const BASE = { teacher: '#/', school: '#/s/', screening: '#/sc/' }; // hash prefix of each module's pages
 
 // state.snaps / cur / prev always refer to the active module (state.mod)
 const state = {
     mod: 'teacher',
-    mods: { teacher: { snaps: [], cur: '', prev: '' }, school: { snaps: [], cur: '', prev: '' } },
+    mods: Object.fromEntries(Object.keys(MODS).map(k => [k, { snaps: [], cur: '', prev: '' }])),
     charts: [], cache: {},
 };
 ['snaps', 'cur', 'prev'].forEach(k => Object.defineProperty(state, k, {
@@ -71,15 +76,15 @@ function download(blob, name) {
 
 // ---------------------------------------------------------------- storage (IndexedDB, falls back to memory)
 // One object store per module, keyed by date; "meta" holds the uploaded school master (key 'master')
-const STORES = { teacher: 'snapshots', school: 'school_snapshots', meta: 'meta' };
+const STORES = { teacher: 'snapshots', school: 'school_snapshots', screening: 'screening_snapshots', meta: 'meta' };
 const DB = {
     db: null,
-    mem: { teacher: new Map(), school: new Map(), meta: new Map() },
+    mem: Object.fromEntries(Object.keys(STORES).map(k => [k, new Map()])),
     open() {
         return new Promise(res => {
             setTimeout(res, 3000); // some browsers/private modes never answer; fall back to memory
             try {
-                const r = indexedDB.open('prashast-monitor', 3);
+                const r = indexedDB.open('prashast-monitor', 4);
                 r.onupgradeneeded = () => Object.entries(STORES).forEach(([kind, n]) => {
                     if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: kind === 'meta' ? 'key' : 'date' });
                 });
@@ -103,9 +108,11 @@ const DB = {
 };
 
 // ---------------------------------------------------------------- Excel parsing
-// Returns { kind: 'teacher' | 'school', schools }. The kind is detected from the columns:
-// teacher files have Total Teachers / Teachers Onboarded, school files have a Status column.
-const isDone = st => /^(completed?|onboarded|yes)$/i.test(String(st).trim());
+// Returns { kind: 'teacher' | 'school' | 'screening', schools }. The kind is detected from the columns:
+// screening files have Screened Students, teacher files have Total Teachers / Teachers Onboarded,
+// school files have a Status column.
+const isDone = st => /^(completed?|on-?\s*boarded|yes)$/i.test(String(st).trim());
+const isStarted = st => !!String(st ?? '').trim() && !/not\s*started|^no$/i.test(String(st));
 
 function parseWorkbook(buf) {
     const wb = XLSX.read(buf, { type: 'array' });
@@ -122,7 +129,10 @@ function parseWorkbook(buf) {
         const iTotal = find(x => /total/i.test(x));
         const iOnb = find(x => /onboarded/i.test(x), x => !/%|percent/i.test(x));
         const iStatus = find(x => /status/i.test(x));
-        const kind = iTotal >= 0 && iOnb >= 0 ? 'teacher' : iStatus >= 0 ? 'school' : null;
+        const iScreened = find(x => /screened/i.test(x));
+        const iStarted = find(x => /screening\s*started/i.test(x));
+        const iStudents = find(x => /total\s*students/i.test(x));
+        const kind = iScreened >= 0 ? 'screening' : iTotal >= 0 && iOnb >= 0 ? 'teacher' : iStatus >= 0 ? 'school' : null;
         if (!kind) throw new Error(`Sheet "${name}": neither "Total Teachers" / "Teachers Onboarded" nor "Status" columns found`);
         const schools = [];
         for (const r of rows.slice(hi + 1)) {
@@ -132,9 +142,13 @@ function parseWorkbook(buf) {
             const k = n.lastIndexOf('|');
             if (!u && k >= 0) { u = n.slice(k + 1).trim(); n = n.slice(0, k).trim(); }
             const b = iBlock >= 0 ? String(r[iBlock] ?? '').trim() : '';
-            schools.push(kind === 'teacher'
-                ? { b: b || 'UNKNOWN', n, u, t: num(r[iTotal]), o: num(r[iOnb]) }
-                : { b: b || 'UNKNOWN', n, u, st: String(r[iStatus] ?? '').trim() || 'Pending' });
+            schools.push(kind === 'teacher' ? { b: b || 'UNKNOWN', n, u, t: num(r[iTotal]), o: num(r[iOnb]) }
+                : kind === 'school' ? { b: b || 'UNKNOWN', n, u, st: String(r[iStatus] ?? '').trim() || 'Pending' }
+                : {
+                    b: b || 'UNKNOWN', n, u,
+                    ob: iOnb >= 0 ? String(r[iOnb] ?? '').trim() : '', ss: iStarted >= 0 ? String(r[iStarted] ?? '').trim() : '',
+                    ts: iStudents >= 0 ? num(r[iStudents]) : 0, sc: num(r[iScreened]),
+                });
         }
         if (schools.length) return { kind, schools };
     }
@@ -166,8 +180,11 @@ function category(x) {
     if (x.o <= 0) return 'zero';
     return 'part';
 }
-const blank = block => ({ block, schools: 0, t: 0, o: 0, full: 0, part: 0, zero: 0, na: 0, done: 0, pending: 0 });
-function addTo(a, x) { a.schools++; a.t += x.t; a.o += x.o; a[x.c]++; }
+const blank = block => ({
+    block, schools: 0, t: 0, o: 0, full: 0, part: 0, zero: 0, na: 0, done: 0, pending: 0,
+    so: 0, sst: 0, notonb: 0, onb: 0, scr: 0, scrfull: 0,
+});
+function addTo(a, x) { a.schools++; a.t += x.t; a.o += x.o; a[x.c]++; a.so += x.so || 0; a.sst += x.sst || 0; }
 function finish(a) { a.p = pct(a.o, a.t); a.pend = Math.max(0, a.t - a.o); return a; }
 
 // In the school module every school counts as t = 1 and o = 1 when its status is Completed,
@@ -178,6 +195,13 @@ function enrich(s) {
     const T = blank('District Total');
     s.schools.forEach(x => {
         if (s.kind === 'school') { x.t = 1; x.o = isDone(x.st) ? 1 : 0; x.c = x.o ? 'done' : 'pending'; }
+        else if (s.kind === 'screening') {
+            // t / o = total / screened students; so / sst = school onboarded / screening started
+            x.t = x.ts; x.o = x.sc;
+            x.sst = isStarted(x.ss) || x.sc > 0 ? 1 : 0;
+            x.so = isDone(x.ob) || x.sst ? 1 : 0;
+            x.c = x.sst ? (x.t && x.o >= x.t ? 'scrfull' : 'scr') : x.so ? 'onb' : 'notonb';
+        }
         else x.c = category(x);
         x.p = pct(x.o, x.t);
         x.pend = Math.max(0, x.t - x.o);
@@ -216,6 +240,8 @@ function rankedBlocks(S, P) {
                 dP: pb ? b.p - pb.p : null,
                 dFull: pb ? b.full - pb.full : null,
                 dZero: pb ? b.zero - pb.zero : null,
+                dSo: pb ? b.so - pb.so : null,
+                dSst: pb ? b.sst - pb.sst : null,
             };
         }).sort((a, b) => b.p - a.p || b.o - a.o);
         const n = rows.length, q = Math.ceil(n / 4);
@@ -236,7 +262,7 @@ function schoolRows(S, P) {
 
 function totalsRow(rows, label = 'District Total') {
     const T = blank(label);
-    rows.forEach(r => { T.schools += r.schools ?? 1; T.t += r.t; T.o += r.o; ['full', 'part', 'zero', 'na', 'done', 'pending'].forEach(k => { T[k] += r[k] || 0; }); });
+    rows.forEach(r => { T.schools += r.schools ?? 1; T.t += r.t; T.o += r.o; ['full', 'part', 'zero', 'na', 'done', 'pending', 'so', 'sst', 'notonb', 'onb', 'scr', 'scrfull'].forEach(k => { T[k] += r[k] || 0; }); });
     finish(T);
     T.dO = rows.some(r => r.dO != null) ? rows.reduce((s, r) => s + (r.dO || 0), 0) : null;
     return T;
@@ -997,7 +1023,7 @@ function pageData(v) {
             <strong>Drag &amp; drop the Excel file(s) here</strong>
             <span class="help">or</span>
             <span class="btn primary">Browse files</span>
-            <span class="help drop-note">.xlsx &middot; <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> or <code>Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx</code>, and the School Search <code>.csv</code> (school master) &middot; several files can be uploaded together</span>
+            <span class="help drop-note">.xlsx &middot; <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> or <code>Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx</code> or <code>Schools_Screening_Status_Part1_All_Blocks_2026-10-29.xlsx</code>, and the School Search <code>.csv</code> (school master) &middot; several files can be uploaded together</span>
         </label>
         <div class="upload-opts">
             <div class="field">
@@ -1034,6 +1060,13 @@ function pageData(v) {
         <td class="nowrap">${delBtn('school', r)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No data uploaded yet</td></tr>'}
     </tbody></table></div>`));
 
+    const xRows = listed('screening');
+    const xList = card(v, `Screening (Part-1) data (${xRows.length} day${xRows.length === 1 ? '' : 's'})`, null, true);
+    xList.append(h(`<div class="table-wrap"><table><thead><tr><th>Date</th><th>File</th><th class="num">Schools</th><th class="num">Onboarded</th><th class="num">Screening started</th><th class="num">Students</th><th class="num">Screened</th><th class="num">%</th><th></th></tr></thead><tbody>
+        ${xRows.map(r => `<tr><td class="nowrap"><b>${fmtD(r.date)}</b></td><td>${fileCell(r)}</td><td class="num">${fmtN(r.schools)}</td><td class="num">${fmtN(r.so)}</td><td class="num">${fmtN(r.sst)}</td><td class="num">${fmtN(r.t)}</td><td class="num">${fmtN(r.o)}</td><td class="num">${fmtP(r.p)}</td>
+        <td class="nowrap">${delBtn('screening', r)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">No data uploaded yet</td></tr>'}
+    </tbody></table></div>`));
+
     const onDel = async e => {
         const b = e.target.closest('[data-del]');
         if (!b || !confirm(`Delete ${MODS[b.dataset.kind]} data of ${fmtD(b.dataset.del)}?`)) return;
@@ -1043,11 +1076,12 @@ function pageData(v) {
     };
     tList.onclick = onDel;
     sList.onclick = onDel;
+    xList.onclick = onDel;
 
     const mi = state.masterInfo;
     const mBox = card(v, 'School master (Management / Category / Type)');
     const unmatched = kind => { const s = state.mods[kind].snaps; const last = s[s.length - 1]; return last ? last.schools.filter(x => !state.master || !state.master.has(x.u)).length : null; };
-    const um = ['teacher', 'school'].map(k => [k, unmatched(k)]).filter(([, n]) => n != null);
+    const um = Object.keys(MODS).map(k => [k, unmatched(k)]).filter(([, n]) => n != null);
     mBox.append(h(`<div class="help" style="font-size:13px">
         <p>The <b>Management</b>, <b>Category</b> and <b>Type</b> of each school come from the School Search export
         (columns UDISE Code, Management, Category, Type), matched by UDISE code. Upload a newer CSV here at any time; it replaces the one in use in this browser.</p>
@@ -1068,15 +1102,17 @@ function pageData(v) {
         <div class="actions"><button class="btn primary" id="bkDown">&#11015; Download backup (.json)</button>
         <label class="btn">&#11014; Restore backup<input type="file" id="bkUp" accept=".json" hidden></label>
         <button class="btn danger" id="bkClear">Delete all uploaded data</button></div></div>`));
-    // Backup v2: "snapshots" = teacher data (same as v1), "schoolSnapshots" = school data
+    // Backup v3: "snapshots" = teacher data (same as v1), "schoolSnapshots" = school data, "screeningSnapshots" = screening data
     $('#bkDown', bk).onclick = async () => {
         const meta = s => ({ date: s.date, fileName: s.fileName, uploadedAt: s.uploadedAt });
         const teacher = (await DB.all('teacher')).sort(byDate);
         const school = (await DB.all('school')).sort(byDate);
+        const screening = (await DB.all('screening')).sort(byDate);
         const data = {
-            app: 'prashast-monitor', version: 2, exported: new Date().toISOString(),
+            app: 'prashast-monitor', version: 3, exported: new Date().toISOString(),
             snapshots: teacher.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, t, o }) => ({ b, n, u, t, o })) })),
             schoolSnapshots: school.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, st }) => ({ b, n, u, st })) })),
+            screeningSnapshots: screening.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, ob, ss, ts, sc }) => ({ b, n, u, ob, ss, ts, sc })) })),
             master: (await DB.all('meta')).find(x => x.key === 'master') || null,
         };
         download(new Blob([JSON.stringify(data)], { type: 'application/json' }), `prashast-monitor-backup_${new Date().toISOString().slice(0, 10)}.json`);
@@ -1089,16 +1125,19 @@ function pageData(v) {
             if (!Array.isArray(data.snapshots)) throw new Error('Not a backup file of this portal');
             const school = Array.isArray(data.schoolSnapshots) ? data.schoolSnapshots : [];
             for (const s of data.snapshots) await DB.put('teacher', { ...s, source: 'upload' });
+            const screening = Array.isArray(data.screeningSnapshots) ? data.screeningSnapshots : [];
             for (const s of school) await DB.put('school', { ...s, source: 'upload' });
+            for (const s of screening) await DB.put('screening', { ...s, source: 'upload' });
             if (data.master) await DB.put('meta', data.master);
             await reload();
-            toast(`Restored ${data.snapshots.length} teacher day(s) and ${school.length} school day(s)`);
+            toast(`Restored ${data.snapshots.length} teacher, ${school.length} school and ${screening.length} screening day(s)`);
         } catch (err) { toast('Restore failed: ' + err.message, true); }
     };
     $('#bkClear', bk).onclick = async () => {
-        if (!confirm('Delete ALL uploaded data (teacher and school onboarding) from this browser? Download a backup first if needed.')) return;
+        if (!confirm('Delete ALL uploaded data (teacher onboarding, school onboarding and screening) from this browser? Download a backup first if needed.')) return;
         await DB.clear('teacher');
         await DB.clear('school');
+        await DB.clear('screening');
         await DB.clear('meta');
         await reload();
         toast('All uploaded data deleted');
@@ -1431,25 +1470,377 @@ function sTrend(v) {
     draw('p');
 }
 
-// ================================================================ Management / Category-wise report (both modules)
-const groupColsFor = (school, label) => {
-    const g = col(C.block, { h: label, cls: 'wrap' });
-    return school
-        ? [C.idx, g, SC.schools, SC.o, SC.pend, C.p, SC.dO, C.dP]
-        : [C.idx, g, C.schools, C.t, C.o, col(C.pend, { invert: true }), C.p, C.dO, C.dP, C.full, C.part, C.zero];
+// ================================================================ Screening (Part-1) module
+// Each school: t / o = total / screened students, so = onboarded (0/1), sst = screening started (0/1),
+// c = stage: notonb -> onb (onboarded, not started) -> scr (started) -> scrfull (all students screened).
+const XC = {
+    schools: col(C.schools, { h: 'Total Schools' }),
+    so: { k: 'so', h: 'Schools Onboarded', type: 'n' },
+    sop: { k: 'sop', h: 'Onboarded %', type: 'p', v: r => pct(r.so, r.schools) },
+    sst: { k: 'sst', h: 'Screening Started', type: 'n' },
+    sstp: { k: 'sstp', h: 'Started %', type: 'p', v: r => pct(r.sst, r.schools) },
+    t: col(C.t, { h: 'Total Students' }),
+    o: col(C.o, { h: 'Screened Students' }),
+    pend: col(C.pend, { h: 'Not Screened', invert: true }),
+    p: col(C.p, { h: 'Screened %' }),
+    dO: col(C.dO, { h: 'Change (Screened)' }),
+    dSst: { k: 'dSst', h: 'Change (Started)', type: 'd' },
+    stage: col(C.cat, { h: 'Stage' }),
 };
-const groupLink = (school, by, block) => r => {
+const STAGES = ['notonb', 'onb', 'scr', 'scrfull'];
+const XT = { all: 'All Schools', notonb: 'Schools Not Onboarded', onb: 'Onboarded, Screening Not Started', started: 'Screening Started', scrfull: 'All Students Screened' };
+const xTitle = t => `Screening (Part-1) - ${t}`;
+const xGo = r => { location.hash = '#/sc/schools?block=' + encodeURIComponent(r.block || r.b); };
+const STAGE_COLOR = { notonb: COLORS.bad, onb: COLORS.mid, scr: COLORS.brand2, scrfull: COLORS.good };
+
+function xDashboard(v) {
+    const S = cur(), P = prev(), T = S.total, PT = P && P.total;
+    const d = k => (PT ? T[k] - PT[k] : null);
+    const ranked = rankedBlocks(S, P);
+    const count = s => ranked.filter(b => b.status === s).length;
+    pageHead(v, 'Screening (Part-1) Dashboard', subLine(S, P));
+
+    const chg = PT ? `<span class="hero-chip ${T.p >= PT.p ? 'pos' : 'neg'}">${icon(T.p >= PT.p ? 'up' : 'down')} ${signed(T.p - PT.p, true)} pt &middot; ${signed(T.o - PT.o)} students since ${fmtD(P.date)}</span>` : '';
+    v.append(h(`<section class="hero">
+        <div class="ring" style="--p:${Math.min(100, T.p)}"><div class="ring-in"><b>${fmtP(T.p)}%</b><small>screened</small></div></div>
+        <div class="hero-main">
+            <div class="hero-label">District student screening (Part-1) &middot; Purba Bardhaman</div>
+            <div class="hero-title"><b>${fmtN(T.o)}</b> of ${fmtN(T.t)} students screened</div>
+            <div class="hero-bar"><span style="width:${Math.min(100, T.p)}%"></span></div>
+            <div class="hero-meta">Screening started in ${fmtN(T.sst)} of ${fmtN(T.schools)} schools &middot; ${fmtN(T.so)} schools onboarded</div>
+            ${chg}
+        </div>
+        <div class="hero-stats">
+            <div><b>${S.blocks.length}</b><span>Blocks</span></div>
+            <div><b>${fmtN(T.schools)}</b><span>Schools</span></div>
+            <div><b class="g">${count('Leading')}</b><span>Leading blocks</span></div>
+            <div><b class="r">${count('Lagging')}</b><span>Lagging blocks</span></div>
+        </div>
+    </section>`));
+
+    v.append(h(`<div class="stat-grid">
+        ${statCard({ label: 'Total Students', value: fmtN(T.t), delta: d('t'), foot: `in ${fmtN(T.schools)} schools`, ic: 'teacher', tone: 'blue' })}
+        ${statCard({ label: 'Students Screened', value: fmtN(T.o), delta: d('o'), foot: `${fmtP(T.p)}% of all students`, ic: 'check', tone: 'green' })}
+        ${statCard({ label: 'Schools Onboarded', value: fmtN(T.so), delta: d('so'), foot: `${fmtP(pct(T.so, T.schools))}% of schools`, ic: 'school', tone: 'indigo', href: '#/sc/schools?' })}
+        ${statCard({ label: 'Screening Started', value: fmtN(T.sst), delta: d('sst'), foot: `${fmtP(pct(T.sst, T.schools))}% of schools`, ic: 'up', tone: 'red', href: '#/sc/schools/started' })}
+    </div>`));
+
+    const stageCard = (key, cls, ic, invert) => {
+        const n = T[key], share = pct(n, T.schools), dd = d(key);
+        return `<a class="cat-card ${cls}" href="#/sc/schools/${key}">
+            <div class="cat-top"><span class="cat-icon">${icon(ic)}</span><span class="cat-label">${CAT[key]}</span><span class="cat-link">View list &rsaquo;</span></div>
+            <div class="cat-val">${fmtN(n)} <small>schools</small></div>
+            <div class="cat-bar"><span style="width:${share}%"></span></div>
+            <div class="cat-foot"><span>${fmtP(share)}% of schools</span>${dd == null ? '' : deltaHtml(dd, false, invert)}</div>
+        </a>`;
+    };
+    v.append(h(`<div class="cat-grid four">
+        ${stageCard('notonb', 'zero', 'zero', true)}
+        ${stageCard('onb', 'part', 'clock', true)}
+        ${stageCard('scr', 'info', 'part')}
+        ${stageCard('scrfull', 'full', 'full')}
+    </div>`));
+
+    const best = ranked[0], worst = ranked[ranked.length - 1];
+    const noStart = ranked.filter(b => b.sst === 0).map(b => b.block);
+    const mostWaiting = [...ranked].sort((a, b) => b.onb - a.onb)[0];
+    const notes = [
+        ['up', `Highest screening: <b>${esc(best.block)}</b> at ${fmtP(best.p)}% of students; lowest: <b>${esc(worst.block)}</b> at ${fmtP(worst.p)}%.`],
+        ['flag', `<b>${fmtN(T.onb)}</b> onboarded schools have not started screening; most in <b>${esc(mostWaiting.block)}</b> (${fmtN(mostWaiting.onb)}). <a href="#/sc/schools/onb">See list &rsaquo;</a>`],
+        ['zero', noStart.length ? `Screening has not started in any school of ${noStart.length} block(s): ${noStart.map(esc).join(', ')}.` : 'Screening has started in every block.'],
+    ];
+    if (P) {
+        const sr = schoolRows(S, P);
+        const newStart = sr.filter(x => x.sst && x.cPrev && !['scr', 'scrfull'].includes(x.cPrev)).length;
+        const newOnb = sr.filter(x => x.so && x.cPrev === 'notonb').length;
+        const regressed = sr.filter(x => x.dO < 0).length;
+        const gainer = [...ranked].sort((a, b) => (b.dO || 0) - (a.dO || 0))[0];
+        notes.unshift(['check', `Since ${fmtD(P.date)}: screening started in <b>${fmtN(newStart)}</b> more schools and <b>${fmtN(newOnb)}</b> schools were newly onboarded. <a href="#/sc/compare">Details &rsaquo;</a>`]);
+        if (gainer && gainer.dO > 0) notes.push(['up', `Top gainer since ${fmtD(P.date)}: <b>${esc(gainer.block)}</b> (${signed(gainer.dO)} students screened).`]);
+        if (regressed) notes.push(['down', `<span class="down">${fmtN(regressed)} school(s) show fewer screened students than on ${fmtD(P.date)}</span> &mdash; please verify.`]);
+    }
+    card(v, 'Key Highlights').append(h(`<ul class="highlights">${notes.map(([i, t]) => `<li><span class="hl-icon">${icon(i)}</span><span>${t}</span></li>`).join('')}</ul>`));
+
+    const g = h('<div class="grid-2"></div>');
+    v.append(g);
+    chart(card(g, 'Schools by Screening Stage'), 260, {
+        type: 'doughnut',
+        data: { labels: STAGES.map(k => CAT[k]), datasets: [{ data: STAGES.map(k => T[k]), backgroundColor: STAGES.map(k => STAGE_COLOR[k]), borderWidth: 2, borderColor: '#fff' }] },
+        options: { plugins: { legend: { position: window.innerWidth < 600 ? 'bottom' : 'right', labels: { usePointStyle: true, padding: 14 } } }, cutout: '64%' },
+    });
+    const bands = [['Below 5%', 0, 5], ['5-20%', 5, 20], ['20-50%', 20, 50], ['50% and above', 50, 101]];
+    chart(card(g, 'Blocks by % of Students Screened'), 260, {
+        type: 'bar',
+        data: {
+            labels: bands.map(b => b[0]),
+            datasets: [{ label: 'Blocks', data: bands.map(([, lo, hi]) => ranked.filter(b => b.p >= lo && b.p < hi).length), backgroundColor: [COLORS.bad, COLORS.mid, COLORS.brand2, COLORS.good], borderRadius: 6, maxBarThickness: 56 }],
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: 'Number of blocks' } }, x: { grid: { display: false } } } },
+    });
+    if (state.snaps.length > 1) {
+        const all = state.snaps.map(s => enrich(s));
+        chart(card(v, 'District Daily Trend'), 280, {
+            type: 'line',
+            data: {
+                labels: all.map(s => fmtD(s.date)),
+                datasets: [
+                    { label: 'Students screened %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: 'rgba(26,35,126,.10)', fill: true, tension: .3, yAxisID: 'y', pointRadius: 3 },
+                    { label: 'Schools screening started', data: all.map(s => s.total.sst), borderColor: COLORS.good, tension: .3, yAxisID: 'y1', pointRadius: 3 },
+                    { label: 'Schools onboarded', data: all.map(s => s.total.so), borderColor: COLORS.mid, tension: .3, yAxisID: 'y1', pointRadius: 3 },
+                ],
+            },
+            options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { usePointStyle: true } } }, scales: { y: { ticks: { callback: x => x + '%' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Schools' } } } },
+        });
+    }
+
+    const g2 = h('<div class="grid-2" style="margin-top:16px"></div>');
+    v.append(g2);
+    const mini = [C.rank, C.block, XC.sst, XC.o, XC.p, col(XC.dO, { h: 'Change' })];
+    tableCard(g2, xTitle('Top 5 Leading Blocks'), { cols: mini, rows: ranked.slice(0, 5), onRow: xGo }, plainSub(S, P));
+    tableCard(g2, xTitle('Bottom 5 Lagging Blocks'), { cols: mini, rows: ranked.slice(-5).reverse(), onRow: xGo }, plainSub(S, P));
+    groupSummary(v, S, P);
+}
+
+function xBlocks(v) {
+    const S = cur(), P = prev();
+    const rows = rankedBlocks(S, P);
+    const cols = [C.rank, C.block, XC.schools, XC.so, XC.sop, XC.sst, XC.sstp, XC.t, XC.o, XC.pend, XC.p, XC.dO, XC.dSst, C.status];
+    const foot = totalsRow(rows);
+    if (P) foot.dSst = S.total.sst - P.total.sst;
+    const tbl = makeTable({ cols, rows, foot, onRow: xGo });
+    pageHead(v, 'Block-wise Screening Status (Part-1)', subLine(S, P) + ' &middot; tap a block to see its schools', exportBtns(tableSpec(tbl, xTitle('Block-wise Status'), plainSub(S, P))));
+    v.append(h(`<p class="help">Status: <span class="badge Leading">Leading</span> = top quarter of blocks by % of students screened, <span class="badge Lagging">Lagging</span> = bottom quarter, <span class="badge Moderate">Moderate</span> = the rest.</p>`));
+    card(v, 'All Blocks', null, true).append(tbl.el);
+
+    const byName = [...rows].sort((a, b) => a.block.localeCompare(b.block));
+    chart(card(v, 'Schools by screening stage, by block'), Math.max(320, rows.length * 20 + 60), {
+        type: 'bar',
+        data: { labels: byName.map(b => b.block), datasets: STAGES.map(k => ({ label: CAT[k], data: byName.map(b => b[k]), backgroundColor: STAGE_COLOR[k] })) },
+        options: { indexAxis: 'y', scales: { x: { stacked: true }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } }, interaction: { mode: 'index', intersect: false } },
+    });
+}
+
+function xSchools(v, r) {
+    const S = cur(), P = prev();
+    const catKey = XT[r.arg] ? r.arg : 'all';
+    const block = r.q.get('block') || '';
+    const gf = groupParams(r);
+    let search = '';
+    const all = schoolRows(S, P);
+    const inCat = x => catKey === 'all' || (catKey === 'started' ? x.sst : x.c === catKey);
+    const filtered = () => all.filter(x => (!block || x.b === block) && inCat(x) && inGroups(x, gf) &&
+        (!search || (x.n + ' ' + x.u).toLowerCase().includes(search)));
+    const heading = XT[catKey] + (block ? ` - ${block} Block` : '') + groupTitle(gf);
+    const go = (c, b) => { location.hash = listHash('#/sc/', c, b, gf); };
+
+    const cols = [C.idx];
+    if (!block) cols.push(C.sb);
+    cols.push(C.school, C.udise, ...groupCols(), { k: 'ob', h: 'Onboarding', cls: 'nowrap' }, { k: 'ss', h: 'Screening', cls: 'nowrap' },
+        XC.t, XC.o, XC.pend, XC.p);
+    if (P) cols.push({ k: 'oPrev', h: `Screened on ${fmtD(P.date)}`, type: 'n' }, XC.dO);
+    if (catKey === 'all') cols.push(XC.stage);
+
+    const defaultSort = { onb: ['t', 'desc'], notonb: ['t', 'desc'], started: ['p', 'asc'] }[catKey] || [null];
+    const tbl = makeTable({ cols, rows: filtered(), sort: defaultSort[0], dir: defaultSort[1], pageSize: 50 });
+    pageHead(v, heading, subLine(S, P), exportBtns(tableSpec(tbl, () => xTitle(heading) + (search ? ` (search: ${search})` : ''), plainSub(S, P))));
+
+    const f = h(`<div class="filters">
+        <label>Block<select id="fBlock"><option value="">All blocks</option>${blockNames().map(b => `<option${b === block ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+        <label>Stage<select id="fCat">${Object.keys(XT).map(k => `<option value="${k}"${k === catKey ? ' selected' : ''}>${k === 'all' ? 'All stages' : XT[k]}</option>`).join('')}</select></label>
+        ${groupSelects(S, gf)}
+        <label>Search school / UDISE<input type="search" id="fSearch" placeholder="Type to search..."></label>
+    </div>`);
+    v.append(f);
+    $('#fBlock', f).onchange = e => go(catKey, e.target.value);
+    $('#fCat', f).onchange = e => go(e.target.value, block);
+    wireGroupSelects(f, '#/sc/', catKey, block);
+
+    const chips = h('<div class="chips"></div>');
+    v.append(chips);
+    const drawChips = rows => {
+        const t = totalsRow(rows);
+        chips.innerHTML = `<span class="chip">Schools <b>${fmtN(rows.length)}</b></span><span class="chip">Onboarded <b>${fmtN(t.so)}</b></span>
+            <span class="chip">Screening started <b>${fmtN(t.sst)}</b></span><span class="chip">Students <b>${fmtN(t.t)}</b></span>
+            <span class="chip">Screened <b>${fmtN(t.o)}</b></span><span class="chip">Screened % <b>${fmtP(t.p)}</b></span>`;
+    };
+    drawChips(tbl.rows());
+    let timer;
+    $('#fSearch', f).oninput = e => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { search = e.target.value.trim().toLowerCase(); const rows = filtered(); tbl.setRows(rows); drawChips(rows); }, 200);
+    };
+    card(v, 'Schools', null, true).append(tbl.el);
+}
+
+function xRank(v) {
+    const S = cur(), P = prev();
+    const ranked = rankedBlocks(S, P);
+    const sub = plainSub(S, P);
+    pageHead(v, 'Leading & Lagging (Screening Part-1)', subLine(S, P));
+    const bcols = [C.rank, C.block, XC.sst, XC.sstp, XC.t, XC.o, XC.p, XC.dO];
+
+    const g1 = h('<div class="grid-2"></div>');
+    v.append(g1);
+    tableCard(g1, xTitle('Top 10 Leading Blocks'), { cols: bcols, rows: ranked.slice(0, 10), onRow: xGo }, sub);
+    tableCard(g1, xTitle('Bottom 10 Lagging Blocks'), { cols: bcols, rows: ranked.slice(-10).reverse(), onRow: xGo }, sub);
+
+    const g2 = h('<div class="grid-2" style="margin-top:16px"></div>');
+    v.append(g2);
+    if (P) {
+        tableCard(g2, xTitle(`Top Gainers since ${fmtD(P.date)}`), { cols: [C.idx, C.block, XC.dO, C.dP, XC.dSst, XC.p], rows: [...ranked].sort((a, b) => b.dO - a.dO).slice(0, 10), onRow: xGo }, sub);
+        tableCard(g2, xTitle(`Least Progress since ${fmtD(P.date)}`), { cols: [C.idx, C.block, XC.dO, C.dP, XC.p, XC.pend], rows: [...ranked].sort((a, b) => a.dO - b.dO || a.p - b.p).slice(0, 10), onRow: xGo }, sub);
+    }
+    tableCard(g2, xTitle('Most Onboarded Schools Not Started'), { cols: [C.idx, C.block, XC.so, { k: 'onb', h: 'Onboarded, not started', type: 'n' }, XC.sst], rows: [...ranked].sort((a, b) => b.onb - a.onb).slice(0, 10), onRow: xGo }, sub);
+    tableCard(g2, xTitle('Most Students Not Screened'), { cols: [C.idx, C.block, XC.t, XC.o, XC.pend, XC.p], rows: [...ranked].sort((a, b) => b.pend - a.pend).slice(0, 10), onRow: xGo }, sub);
+
+    const sr = schoolRows(S, P);
+    const scols = [C.idx, C.sb, C.school, C.udise, XC.t, XC.o, XC.pend, XC.p];
+    const g3 = h('<div class="stack" style="margin-top:16px"></div>');
+    v.append(g3);
+    tableCard(g3, xTitle('Large Onboarded Schools Not Started (Top 50 by students)'), { cols: scols, rows: sr.filter(x => x.c === 'onb').sort((a, b) => b.t - a.t).slice(0, 50) }, sub);
+    tableCard(g3, xTitle('Large Schools Not Onboarded (Top 50 by students)'), { cols: scols, rows: sr.filter(x => x.c === 'notonb').sort((a, b) => b.t - a.t).slice(0, 50) }, sub);
+    if (P) tableCard(g3, xTitle(`Best Performing Schools since ${fmtD(P.date)} (Top 50)`), { cols: [...scols, XC.dO], rows: sr.filter(x => x.dO > 0).sort((a, b) => b.dO - a.dO).slice(0, 50) }, sub);
+}
+
+function xCompare(v, r) {
+    if (state.snaps.length < 2) {
+        pageHead(v, 'Day-wise Comparison (Screening Part-1)');
+        v.append(h('<div class="card"><div class="card-body">Upload screening data for at least two dates to compare.</div></div>'));
+        return;
+    }
+    const dates = state.snaps.map(s => s.date);
+    const bDate = r.q.get('b') || state.cur;
+    const aDate = r.q.get('a') || state.prev || dates[Math.max(0, dates.indexOf(bDate) - 1)];
+    const A = snap(aDate), B = snap(bDate);
+    const opts = sel => dates.slice().reverse().map(d => `<option value="${d}"${d === sel ? ' selected' : ''}>${fmtD(d)}</option>`).join('');
+    const sub = `${fmtD(A.date)} vs ${fmtD(B.date)}`;
+    pageHead(v, 'Day-wise Comparison (Screening Part-1)', `Changes from <b>${fmtD(A.date)}</b> to <b>${fmtD(B.date)}</b>`);
+
+    const f = h(`<div class="filters"><label>From date<select id="cA">${opts(aDate)}</select></label><label>To date<select id="cB">${opts(bDate)}</select></label></div>`);
+    v.append(f);
+    const go = () => { location.hash = `#/sc/compare?a=${$('#cA').value}&b=${$('#cB').value}`; };
+    $('#cA', f).onchange = go;
+    $('#cB', f).onchange = go;
+
+    const TA = A.total, TB = B.total;
+    const k = (label, key, o = {}) => `<div class="kpi ${o.cls || ''}"><span class="kpi-label">${label}</span><span class="kpi-val">${o.pct ? fmtP(TB[key]) + '%' : fmtN(TB[key])}</span><span class="kpi-delta">${deltaHtml(TB[key] - TA[key], o.pct, o.invert)} <small>from ${o.pct ? fmtP(TA[key]) + '%' : fmtN(TA[key])}</small></span></div>`;
+    v.append(h(`<div class="kpis">${k('Students Screened', 'o', { cls: 'good' })}${k('Screened %', 'p', { pct: true })}${k('Screening Started', 'sst', { cls: 'good' })}${k('Schools Onboarded', 'so', { cls: 'mid' })}${k('Not Onboarded', 'notonb', { invert: true, cls: 'bad' })}${k('Total Students', 't')}</div>`));
+
+    const names = [...new Set([...A.blocks, ...B.blocks].map(b => b.block))];
+    const rows = names.map(n => {
+        const a = A.byBlock.get(n) || finish(blank(n)), b = B.byBlock.get(n) || finish(blank(n));
+        return { block: n, t: b.t, oA: a.o, o: b.o, dO: b.o - a.o, pA: a.p, p: b.p, dP: b.p - a.p, sstA: a.sst, sst: b.sst, dSst: b.sst - a.sst, soA: a.so, so: b.so };
+    });
+    const tot = { block: 'District Total', t: TB.t, oA: TA.o, o: TB.o, dO: TB.o - TA.o, pA: TA.p, p: TB.p, dP: TB.p - TA.p, sstA: TA.sst, sst: TB.sst, dSst: TB.sst - TA.sst, soA: TA.so, so: TB.so };
+    const dA = fmtD(A.date), dB = fmtD(B.date);
+    tableCard(v, xTitle('Block-wise Comparison'), {
+        cols: [C.idx, C.block, XC.t, { k: 'oA', h: `Screened ${dA}`, type: 'n' }, { k: 'o', h: `Screened ${dB}`, type: 'n' }, XC.dO,
+            { k: 'pA', h: `% ${dA}`, type: 'p' }, { k: 'p', h: `% ${dB}`, type: 'p' }, C.dP,
+            { k: 'sstA', h: `Started ${dA}`, type: 'n' }, { k: 'sst', h: `Started ${dB}`, type: 'n' }, XC.dSst,
+            { k: 'soA', h: `Onboarded ${dA}`, type: 'n' }, { k: 'so', h: `Onboarded ${dB}`, type: 'n' }],
+        rows, sort: 'dO', foot: tot,
+    }, sub);
+
+    const sr = schoolRows(B, A);
+    const wasStarted = x => ['scr', 'scrfull'].includes(x.cPrev);
+    const groups = [
+        ['Screening newly started', x => x.sst && x.cPrev && !wasStarted(x)],
+        ['Newly onboarded', x => x.so && x.cPrev === 'notonb'],
+        ['More students screened', x => x.dO > 0],
+        ['Onboarded, still not started', x => x.c === 'onb' && x.cPrev && x.cPrev !== 'notonb'],
+        ['Still not onboarded', x => x.c === 'notonb' && x.cPrev === 'notonb'],
+        ['Screened count decreased', x => x.dO < 0],
+        ['New in later file', x => x.cPrev == null],
+    ].map(([label, fn]) => ({ label, rows: sr.filter(fn) }));
+    let active = groups[0];
+    const cols = [C.idx, C.sb, C.school, C.udise, XC.t, { k: 'oPrev', h: `Screened ${dA}`, type: 'n' }, { k: 'o', h: `Screened ${dB}`, type: 'n' }, XC.dO,
+        { k: 'cPrev', h: `Stage ${dA}`, type: 'cat' }, { k: 'c', h: `Stage ${dB}`, type: 'cat' }];
+    const tbl = makeTable({ cols, rows: active.rows, sort: 'dO', pageSize: 50 });
+    const body = card(v, 'School-level Movement', exportBtns(() => tableSpec(tbl, xTitle(`School Movement - ${active.label}`), sub)()), true);
+    const tabs = h(`<div class="tabs">${groups.map((g, i) => `<button class="tab${i === 0 ? ' active' : ''}" data-i="${i}">${g.label}<span class="count">${fmtN(g.rows.length)}</span></button>`).join('')}</div>`);
+    tabs.onclick = e => {
+        const b = e.target.closest('.tab');
+        if (!b) return;
+        active = groups[Number(b.dataset.i)];
+        tabs.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
+        tbl.setRows(active.rows);
+    };
+    body.append(tabs, tbl.el);
+}
+
+function xTrend(v) {
+    const all = state.snaps.map(s => enrich(s));
+    const rows = all.map((s, i) => {
+        const p = i ? all[i - 1].total : null, t = s.total;
+        return { date: s.date, schools: t.schools, so: t.so, sst: t.sst, dSst: p ? t.sst - p.sst : null, t: t.t, o: t.o, dO: p ? t.o - p.o : null, p: t.p, dP: p ? t.p - p.p : null, pend: t.pend };
+    }).reverse();
+    pageHead(v, 'Daily Trend (Screening Part-1)', `${all.length} day(s) of data, from <b>${fmtD(all[0].date)}</b> to <b>${fmtD(all[all.length - 1].date)}</b>`);
+
+    if (all.length > 1) {
+        chart(card(v, 'District screening by date'), 280, {
+            type: 'bar',
+            data: {
+                labels: all.map(s => fmtD(s.date)),
+                datasets: [
+                    { type: 'line', label: 'Students screened %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: COLORS.brand, yAxisID: 'y1', tension: .25 },
+                    { label: 'Students screened', data: all.map(s => s.total.o), backgroundColor: 'rgba(46,125,50,.4)', yAxisID: 'y' },
+                ],
+            },
+            options: { interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: x => x + '%' } } } },
+        });
+    }
+
+    tableCard(v, xTitle('District Date-wise Summary'), {
+        cols: [{ k: 'date', h: 'Date', cls: 'nowrap', show: fmtD }, XC.schools, XC.so, XC.sst, col(XC.dSst, { h: 'Daily change (started)' }), XC.t, XC.o, col(XC.dO, { h: 'Daily change (screened)' }), XC.p, C.dP, XC.pend],
+        rows,
+    });
+
+    const metricBox = card(v, 'Block-wise Trend (by date)');
+    const sel = h('<div class="filters"><label>Show<select><option value="p">Students screened %</option><option value="o">Students screened</option><option value="sst">Schools screening started</option><option value="so">Schools onboarded</option></select></label></div>');
+    metricBox.append(sel);
+    const holder = h('<div></div>');
+    metricBox.append(holder);
+    const draw = metric => {
+        holder.innerHTML = '';
+        const last = all[all.length - 1], first = all[0];
+        const type = metric === 'p' ? 'p' : 'n';
+        const cols = [C.idx, C.block, ...all.map(s => ({ k: s.date, h: fmtD(s.date), type })),
+            { k: 'chg', h: 'Change (first to last)', type: metric === 'p' ? 'dp' : 'd' }];
+        const rows = last.blocks.map(b => {
+            const r = { block: b.block };
+            all.forEach(s => { const x = s.byBlock.get(b.block); r[s.date] = x ? x[metric] : null; });
+            r.chg = r[last.date] != null && r[first.date] != null ? r[last.date] - r[first.date] : null;
+            return r;
+        });
+        const label = sel.querySelector('option:checked').textContent;
+        const tbl = makeTable({ cols, rows, sort: last.date });
+        const bar = h('<div class="actions" style="margin-bottom:8px"></div>');
+        bar.append(exportBtns(tableSpec(tbl, xTitle(`Block-wise Trend - ${label}`), `${fmtD(first.date)} to ${fmtD(last.date)}`)));
+        holder.append(bar, tbl.el);
+    };
+    $('select', sel).onchange = e => draw(e.target.value);
+    draw('p');
+}
+
+// ================================================================ Management / Category-wise report (both modules)
+const groupColsFor = (mod, label) => {
+    const g = col(C.block, { h: label, cls: 'wrap' });
+    if (mod === 'school') return [C.idx, g, SC.schools, SC.o, SC.pend, C.p, SC.dO, C.dP];
+    if (mod === 'screening') return [C.idx, g, XC.schools, XC.so, XC.sop, XC.sst, XC.sstp, XC.t, XC.o, XC.pend, XC.p, XC.dO];
+    return [C.idx, g, C.schools, C.t, C.o, col(C.pend, { invert: true }), C.p, C.dO, C.dP, C.full, C.part, C.zero];
+};
+const groupLink = (by, block) => r => {
     const q = new URLSearchParams({ [by]: r.block });
     if (block) q.set('block', block);
-    location.hash = `${school ? '#/s/' : '#/'}schools?${q}`;
+    location.hash = `${BASE[state.mod]}schools?${q}`;
 };
 
 function pageGroups(v, r) {
-    const S = cur(), P = prev(), school = state.mod === 'school';
+    const S = cur(), P = prev(), mod = state.mod;
     const by = GROUPS[r.q.get('by')] ? r.q.get('by') : 'mg';
     const block = r.q.get('block') || '';
     const label = GROUPS[by];
-    const base = school ? '#/s/' : '#/';
+    const base = BASE[mod];
     const title = `${MODS[state.mod]} - ${label}-wise Report${block ? ` - ${block} Block` : ''}`;
     pageHead(v, `${label}-wise Report (${MODS[state.mod]})`, subLine(S, P) + ' &middot; tap a row to see its schools');
     if (!state.master) {
@@ -1469,7 +1860,7 @@ function pageGroups(v, r) {
     const rows = groupRows(S, P, by, block);
     const foot = totalsRow(rows);
     if (P) foot.dP = foot.p - totalsRow(groupRows(P, null, by, block)).p;
-    tableCard(v, title, { cols: groupColsFor(school, label), rows, foot, sort: 'schools', onRow: groupLink(school, by, block) }, plainSub(S, P));
+    tableCard(v, title, { cols: groupColsFor(mod, label), rows, foot, sort: 'schools', onRow: groupLink(by, block) }, plainSub(S, P));
 
     chart(card(v, `Onboarded % by ${label}`), Math.max(220, rows.length * 34 + 60), {
         type: 'bar',
@@ -1482,9 +1873,11 @@ function pageGroups(v, r) {
 
     // Block x group matrix
     const groups = rows.map(g => g.block);
-    const metrics = school
-        ? [['p', 'Onboarded %'], ['o', 'Schools onboarded'], ['pend', 'Pending schools'], ['schools', 'Total schools']]
-        : [['p', 'Onboarded %'], ['o', 'Teachers onboarded'], ['pend', 'Pending teachers'], ['zero', '0% schools'], ['full', '100% schools'], ['schools', 'Total schools']];
+    const metrics = {
+        school: [['p', 'Onboarded %'], ['o', 'Schools onboarded'], ['pend', 'Pending schools'], ['schools', 'Total schools']],
+        screening: [['p', 'Students screened %'], ['o', 'Screened students'], ['t', 'Total students'], ['sst', 'Schools screening started'], ['so', 'Schools onboarded'], ['schools', 'Total schools']],
+        teacher: [['p', 'Onboarded %'], ['o', 'Teachers onboarded'], ['pend', 'Pending teachers'], ['zero', '0% schools'], ['full', '100% schools'], ['schools', 'Total schools']],
+    }[mod];
     const box = card(v, `Block-wise by ${label}`);
     const sel = h(`<div class="filters"><label>Show<select>${metrics.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></label></div>`);
     const holder = h('<div></div>');
@@ -1523,23 +1916,30 @@ function pageGroups(v, r) {
 // Management and Category summary tables shown at the end of both dashboards
 function groupSummary(v, S, P) {
     if (!state.master) return;
-    const school = state.mod === 'school';
+    const mod = state.mod, base = BASE[mod];
     const g = h('<div class="grid-2" style="margin-top:16px"></div>');
     v.append(g);
     ['mg', 'ct'].forEach(by => {
         const label = GROUPS[by];
-        const cols = [col(C.block, { h: label, cls: 'wrap', v: by === 'ct' ? x => shortCat(x.block) : null }), school ? SC.schools : C.t, school ? SC.o : C.o, C.p, col(C.dO, { h: 'Change' })];
-        const tbl = tableCard(g, `${MODS[state.mod]} by ${label}`, { cols, rows: groupRows(S, P, by, ''), sort: school ? 'schools' : 't', onRow: () => { location.hash = `${school ? '#/s/' : '#/'}groups?by=${by}`; } }, plainSub(S, P));
-        tbl.el.append(h(`<p class="help" style="padding:0 16px 12px"><a href="${school ? '#/s/' : '#/'}groups?by=${by}">Full ${label.toLowerCase()}-wise report &rsaquo;</a></p>`));
+        const gc = col(C.block, { h: label, cls: 'wrap', v: by === 'ct' ? x => shortCat(x.block) : null });
+        const cols = {
+            school: [gc, SC.schools, SC.o, C.p, col(C.dO, { h: 'Change' })],
+            screening: [gc, XC.schools, XC.sst, XC.t, XC.o, XC.p],
+            teacher: [gc, C.t, C.o, C.p, col(C.dO, { h: 'Change' })],
+        }[mod];
+        const tbl = tableCard(g, `${MODS[mod]} by ${label}`, { cols, rows: groupRows(S, P, by, ''), sort: mod === 'teacher' ? 't' : 'schools', onRow: () => { location.hash = `${base}groups?by=${by}`; } }, plainSub(S, P));
+        tbl.el.append(h(`<p class="help" style="padding:0 16px 12px"><a href="${base}groups?by=${by}">Full ${label.toLowerCase()}-wise report &rsaquo;</a></p>`));
     });
 }
 
 function emptyState() {
-    const school = state.mod === 'school';
-    return h(`<div class="card empty-state"><h2>No ${school ? 'school onboarding' : 'teacher onboarding'} data yet</h2>
-        <p>Upload the combined ${school
-        ? '<b>Schools_Onboarding_Status_All_Blocks</b> Excel file (Block Name, School Name, UDISE Code, Status)'
-        : 'school-wise Excel file (the one with the <b>Block Name</b> column)'} to start monitoring.</p>
+    const what = {
+        teacher: 'school-wise Teacher Onboarding Excel file (the one with the <b>Block Name</b> column)',
+        school: '<b>Schools_Onboarding_Status_All_Blocks</b> Excel file (Block Name, School Name, UDISE Code, Status)',
+        screening: '<b>Schools_Screening_Status_Part1_All_Blocks</b> Excel file (Block Name, School Name, UDISE Code, Schools Onboarded, Screening Started, Total Students, Screened Students)',
+    }[state.mod];
+    return h(`<div class="card empty-state"><h2>No ${esc(MODS[state.mod])} data yet</h2>
+        <p>Upload the combined ${what} to start monitoring.</p>
         <p><a class="btn primary" href="#/data">&#11014; Upload Excel</a></p>
         <p class="help">${CREDIT}</p></div>`);
 }
@@ -1652,14 +2052,16 @@ function fillDateSelects() {
 const routes = {
     teacher: { dashboard: pageDashboard, blocks: pageBlocks, schools: pageSchools, compare: pageCompare, trend: pageTrend, rank: pageRank, groups: pageGroups, data: pageData },
     school: { dashboard: sDashboard, blocks: sBlocks, schools: sSchools, compare: sCompare, trend: sTrend, rank: sRank, groups: pageGroups, data: pageData },
+    screening: { dashboard: xDashboard, blocks: xBlocks, schools: xSchools, compare: xCompare, trend: xTrend, rank: xRank, groups: pageGroups, data: pageData },
 };
 
 function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
     const [path, q = ''] = raw.split('?');
     const parts = path.split('/').filter(Boolean);
-    const mod = parts[0] === 's' ? 'school' : parts[0] === 'data' ? state.mod : 'teacher';
-    if (parts[0] === 's') parts.shift();
+    const prefix = { s: 'school', sc: 'screening' }[parts[0]];
+    const mod = prefix || (parts[0] === 'data' ? state.mod : 'teacher');
+    if (prefix) parts.shift();
     return { mod, name: routes[mod][parts[0]] ? parts[0] : 'dashboard', arg: parts[1] || '', q: new URLSearchParams(q) };
 }
 
@@ -1674,9 +2076,9 @@ function render() {
     state.charts = [];
     const r = parseHash();
     setMod(r.mod);
-    document.body.classList.toggle('mod-school', r.mod === 'school');
+    Object.keys(MODS).forEach(m => document.body.classList.toggle('mod-' + m, r.mod === m));
     document.querySelectorAll('.mod-switch [data-mod]').forEach(b => b.classList.toggle('active', b.dataset.mod === r.mod));
-    const key = (r.mod === 'school' && r.name !== 'data' ? 's/' : '') + r.name + (r.arg ? '/' + r.arg : '');
+    const key = (r.name !== 'data' ? BASE[r.mod].slice(2) : '') + r.name + (r.arg ? '/' + r.arg : '');
     document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.route === key));
     const v = $('#view');
     v.innerHTML = '';
@@ -1704,7 +2106,7 @@ async function init() {
     document.querySelectorAll('.mod-switch [data-mod]').forEach(b => { b.onclick = () => {
         const r = parseHash();
         const page = r.name === 'data' ? 'dashboard' : r.name + (r.arg && b.dataset.mod === r.mod ? '/' + r.arg : '');
-        location.hash = (b.dataset.mod === 'school' ? '#/s/' : '#/') + page;
+        location.hash = BASE[b.dataset.mod] + page;
     }; });
     window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
     await DB.open();

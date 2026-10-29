@@ -29,6 +29,7 @@
         <div class="mod-switch" role="group" aria-label="Module">
             <button data-mod="teacher" class="active">&#128105;&#8205;&#127979; Teacher Onboarding</button>
             <button data-mod="school">&#127979; School Onboarding</button>
+            <button data-mod="screening">&#129658; Screening (Part-1)</button>
         </div>
         <nav>
             <div class="nav-teacher">
@@ -60,12 +61,28 @@
                 <a href="#/s/compare" data-route="s/compare">&#8644; Day-wise Comparison</a>
                 <a href="#/s/trend" data-route="s/trend">&#128200; Daily Trend</a>
             </div>
+            <div class="nav-screening">
+                <div class="nav-group">Overview</div>
+                <a href="#/sc/dashboard" data-route="sc/dashboard">&#128202; Dashboard</a>
+                <a href="#/sc/blocks" data-route="sc/blocks">&#127970; Block-wise Status</a>
+                <a href="#/sc/rank" data-route="sc/rank">&#127942; Leading &amp; Lagging</a>
+                <a href="#/sc/groups?by=mg" data-route="sc/groups">&#127891; Management / Category</a>
+                <div class="nav-group">Schools</div>
+                <a href="#/sc/schools" data-route="sc/schools">&#128203; All Schools</a>
+                <a href="#/sc/schools/notonb" data-route="sc/schools/notonb"><i class="dot zero"></i> Not Onboarded</a>
+                <a href="#/sc/schools/onb" data-route="sc/schools/onb"><i class="dot part"></i> Onboarded, Not Started</a>
+                <a href="#/sc/schools/started" data-route="sc/schools/started"><i class="dot info"></i> Screening Started</a>
+                <a href="#/sc/schools/scrfull" data-route="sc/schools/scrfull"><i class="dot full"></i> All Students Screened</a>
+                <div class="nav-group">Progress</div>
+                <a href="#/sc/compare" data-route="sc/compare">&#8644; Day-wise Comparison</a>
+                <a href="#/sc/trend" data-route="sc/trend">&#128200; Daily Trend</a>
+            </div>
             <div class="nav-group">Data</div>
             <a href="#/data" data-route="data">&#11014; Upload / Manage Data</a>
         </nav>
         <div class="side-foot">
             <span class="side-credit">An in-house production of<br><b>SSM, Purba Bardhaman</b></span>
-            <span>Source: PRASHAST portal &mdash; Teacher Onboarding (School Wise Report) and Schools Onboarding Status</span>
+            <span>Source: PRASHAST portal &mdash; Teacher Onboarding (School Wise Report), Schools Onboarding Status and Schools Screening Status [Part-1]</span>
         </div>
     </aside>
     <div id="backdrop"></div>
