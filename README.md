@@ -17,7 +17,8 @@ It is a static site: no server or database is needed, and it runs on **GitHub Pa
 | All / 100% / 1-99% / 0% Schools | School lists filtered by block, category and search, with change since the previous day |
 | Day-wise Comparison | Any two dates side by side: block-wise change, plus schools that improved, became 100%, moved out of 0%, stayed at 0% or decreased |
 | Daily Trend | District summary for every date, plus a block × date matrix (%, onboarded, 0% schools, 100% schools) |
-| Upload / Manage Data | Upload daily files for either module, delete a day, back up and restore |
+| Management / Category | Teacher onboarding by school Management, Category or School Type (optionally for one block), with daily change, 100% / 1-99% / 0% school counts, a chart, and a block × group matrix |
+| Upload / Manage Data | Upload daily files for either module or the school master, delete a day, back up and restore |
 
 The **School Onboarding** module has the same pages, using schools instead of teachers:
 
@@ -29,6 +30,17 @@ The **School Onboarding** module has the same pages, using schools instead of te
 | All / Onboarded / Pending Schools | School lists filtered by block, status and search, with the status on the previous date |
 | Day-wise Comparison | Block-wise change, plus schools newly onboarded, still pending, completed on both dates, reverted to pending |
 | Daily Trend | District summary for every date, plus a block × date matrix (%, onboarded, pending) |
+| Management / Category | School onboarding by Management, Category or School Type, with a block × group matrix |
+
+## School master (Management / Category / Type)
+
+The Management / Category reports, the Management and Category columns in school lists, and the matching filters
+use the **School Search** export (`UDISE Code`, `Management`, `Category`, `Type`), matched by UDISE code.
+
+- For everyone: save it as `data/school_master.csv` in the repository (the name is fixed, it is not listed in the manifest).
+- For one browser: upload the CSV on **Upload / Manage Data**. It overrides the repo copy in that browser.
+
+The Upload page shows how many schools of the latest day are missing from the master; those appear as *Not in school master*.
 
 Every table has **Excel** and **PDF** download buttons. Each file carries the header
 *"Prashast On boarding status :: SSM, Purba Bardhaman"*, the report title, the data date and the generation time.

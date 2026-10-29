@@ -70,18 +70,18 @@ function download(blob, name) {
 }
 
 // ---------------------------------------------------------------- storage (IndexedDB, falls back to memory)
-// One object store per module, keyed by date
-const STORES = { teacher: 'snapshots', school: 'school_snapshots' };
+// One object store per module, keyed by date; "meta" holds the uploaded school master (key 'master')
+const STORES = { teacher: 'snapshots', school: 'school_snapshots', meta: 'meta' };
 const DB = {
     db: null,
-    mem: { teacher: new Map(), school: new Map() },
+    mem: { teacher: new Map(), school: new Map(), meta: new Map() },
     open() {
         return new Promise(res => {
             setTimeout(res, 3000); // some browsers/private modes never answer; fall back to memory
             try {
-                const r = indexedDB.open('prashast-monitor', 2);
-                r.onupgradeneeded = () => Object.values(STORES).forEach(n => {
-                    if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: 'date' });
+                const r = indexedDB.open('prashast-monitor', 3);
+                r.onupgradeneeded = () => Object.entries(STORES).forEach(([kind, n]) => {
+                    if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: kind === 'meta' ? 'key' : 'date' });
                 });
                 r.onsuccess = () => { this.db = r.result; res(); };
                 r.onerror = () => res();
@@ -97,7 +97,7 @@ const DB = {
         });
     },
     all(kind) { return this.db ? this.tx(kind, 'readonly', s => s.getAll()) : Promise.resolve([...this.mem[kind].values()]); },
-    put(kind, v) { if (!this.db) { this.mem[kind].set(v.date, v); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.put(v)); },
+    put(kind, v) { if (!this.db) { this.mem[kind].set(v.date ?? v.key, v); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.put(v)); },
     del(kind, k) { if (!this.db) { this.mem[kind].delete(k); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.delete(k)); },
     clear(kind) { if (!this.db) { this.mem[kind].clear(); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.clear()); },
 };
@@ -139,6 +139,24 @@ function parseWorkbook(buf) {
         if (schools.length) return { kind, schools };
     }
     throw new Error('No sheet with a "School Name" column was found');
+}
+
+// School master (School Search export): UDISE Code, Management, Category, Type.
+// Returns [{ u, mg, ct, ty }] or null when the file is not a master file.
+function parseMaster(buf) {
+    const wb = XLSX.read(buf, { type: 'array' });
+    for (const name of wb.SheetNames) {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '', raw: true });
+        const hi = rows.findIndex(r => r.some(c => /udise/i.test(String(c))) && r.some(c => /management/i.test(String(c))));
+        if (hi < 0) continue;
+        const H = rows[hi].map(c => String(c).trim());
+        const iU = H.findIndex(x => /udise/i.test(x)), iM = H.findIndex(x => /management/i.test(x));
+        const iC = H.findIndex(x => /category/i.test(x)), iT = H.findIndex(x => /^(school\s*)?type$/i.test(x));
+        const txt = (r, i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
+        const out = rows.slice(hi + 1).map(r => ({ u: txt(r, iU), mg: txt(r, iM), ct: txt(r, iC), ty: txt(r, iT) })).filter(x => x.u);
+        if (out.length) return out;
+    }
+    return null;
 }
 
 // ---------------------------------------------------------------- calculations
@@ -223,6 +241,66 @@ function totalsRow(rows, label = 'District Total') {
     T.dO = rows.some(r => r.dO != null) ? rows.reduce((s, r) => s + (r.dO || 0), 0) : null;
     return T;
 }
+
+// ---------------------------------------------------------------- school master groups (Management / Category / Type by UDISE)
+const GROUPS = { mg: 'Management', ct: 'Category', ty: 'School Type' };
+const NO_MASTER = 'Not in school master';
+const groupOf = (x, by) => { const m = state.master && state.master.get(x.u); return (m && m[by]) || NO_MASTER; };
+const shortCat = c => { const m = String(c || '').match(/\(([^)]+)\)\s*$/); return m ? m[1] : c || ''; };
+
+// Rows shaped like block rows (group name in "block") so the block columns and totals can be reused
+function groupRows(S, P, by, block) {
+    return memo(`grp|${by}|${block}|${S.date}|${P ? P.date : ''}`, () => {
+        const agg = X => {
+            const map = new Map();
+            X.schools.forEach(x => {
+                if (block && x.b !== block) return;
+                const g = groupOf(x, by);
+                if (!map.has(g)) map.set(g, blank(g));
+                addTo(map.get(g), x);
+            });
+            map.forEach(finish);
+            return map;
+        };
+        const now = agg(S), before = P ? agg(P) : null;
+        return [...now.values()].map(g => {
+            const pg = before && before.get(g.block);
+            return { ...g, dO: pg ? g.o - pg.o : null, dP: pg ? g.p - pg.p : null };
+        }).sort((a, b) => b.schools - a.schools);
+    });
+}
+
+// School list filters by group (?mg=..&ct=..&ty=..)
+const groupParams = r => Object.keys(GROUPS).filter(k => r.q.get(k)).map(k => [k, r.q.get(k)]);
+const inGroups = (x, gf) => gf.every(([k, val]) => groupOf(x, k) === val);
+const groupTitle = gf => gf.map(([, val]) => ` - ${val}`).join('');
+function listHash(base, cat, block, gf) {
+    const q = new URLSearchParams();
+    if (block) q.set('block', block);
+    gf.forEach(([k, val]) => { if (val) q.set(k, val); });
+    const s = q.toString();
+    return `${base}schools${cat && cat !== 'all' ? '/' + cat : ''}${s ? '?' + s : ''}`;
+}
+function groupSelects(S, gf) {
+    if (!state.master) return '';
+    return Object.keys(GROUPS).map(k => {
+        const sel = (gf.find(g => g[0] === k) || [])[1] || '';
+        const vals = [...new Set(S.schools.map(x => groupOf(x, k)))].sort();
+        return `<label>${GROUPS[k]}<select data-grp="${k}"><option value="">All</option>${vals.map(x => `<option${x === sel ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
+    }).join('');
+}
+function wireGroupSelects(f, base, cat, block) {
+    f.querySelectorAll('[data-grp]').forEach(s => {
+        s.onchange = () => {
+            const gf = [...f.querySelectorAll('[data-grp]')].map(x => [x.dataset.grp, x.value]).filter(g => g[1]);
+            location.hash = listHash(base, cat, block, gf);
+        };
+    });
+}
+const groupCols = () => (state.master ? [
+    { k: 'mg', h: 'Management', cls: 'wrap', v: x => groupOf(x, 'mg') },
+    { k: 'ct', h: 'Category', cls: 'nowrap', v: x => shortCat(groupOf(x, 'ct')) },
+] : []);
 
 // ---------------------------------------------------------------- column definitions
 const C = {
@@ -626,6 +704,7 @@ function pageDashboard(v) {
     const go = r => { location.hash = '#/schools?block=' + encodeURIComponent(r.block); };
     tableCard(g2, 'Top 5 Leading Blocks', { cols: mini, rows: ranked.slice(0, 5), onRow: go }, plainSub(S, P));
     tableCard(g2, 'Bottom 5 Lagging Blocks', { cols: mini, rows: ranked.slice(-5).reverse(), onRow: go }, plainSub(S, P));
+    groupSummary(v, S, P);
 }
 
 function pageBlocks(v) {
@@ -668,14 +747,15 @@ function pageSchools(v, r) {
     const block = r.q.get('block') || '';
     let search = '';
     const all = schoolRows(S, P);
-    const filtered = () => all.filter(x => (!block || x.b === block) && (catKey === 'all' || x.c === catKey) &&
+    const gf = groupParams(r);
+    const filtered = () => all.filter(x => (!block || x.b === block) && (catKey === 'all' || x.c === catKey) && inGroups(x, gf) &&
         (!search || (x.n + ' ' + x.u).toLowerCase().includes(search)));
-    const title = SCHOOL_TITLES[catKey] + (block ? ` - ${block} Block` : '');
-    const go = (c, b) => { location.hash = `#/schools${c && c !== 'all' ? '/' + c : ''}${b ? '?block=' + encodeURIComponent(b) : ''}`; };
+    const title = SCHOOL_TITLES[catKey] + (block ? ` - ${block} Block` : '') + groupTitle(gf);
+    const go = (c, b) => { location.hash = listHash('#/', c, b, gf); };
 
     const cols = [C.idx];
     if (!block) cols.push(C.sb);
-    cols.push(C.school, C.udise, C.t, C.o, col(C.pend, { invert: true }), C.p);
+    cols.push(C.school, C.udise, ...groupCols(), C.t, C.o, col(C.pend, { invert: true }), C.p);
     if (P) cols.push({ k: 'oPrev', h: `Onb. on ${fmtD(P.date)}`, type: 'n' }, C.dO);
     if (catKey === 'all') cols.push(C.cat);
 
@@ -685,12 +765,14 @@ function pageSchools(v, r) {
 
     const f = h(`<div class="filters">
         <label>Block<select id="fBlock"><option value="">All blocks</option>${blockNames().map(b => `<option${b === block ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
-        <label>Category<select id="fCat">${Object.keys(SCHOOL_TITLES).map(k => `<option value="${k}"${k === catKey ? ' selected' : ''}>${k === 'all' ? 'All categories' : CAT[k] + ' onboarded'}</option>`).join('')}</select></label>
+        <label>Onboarding<select id="fCat">${Object.keys(SCHOOL_TITLES).map(k => `<option value="${k}"${k === catKey ? ' selected' : ''}>${k === 'all' ? 'All levels' : CAT[k] + ' onboarded'}</option>`).join('')}</select></label>
+        ${groupSelects(S, gf)}
         <label>Search school / UDISE<input type="search" id="fSearch" placeholder="Type to search..."></label>
     </div>`);
     v.append(f);
     $('#fBlock', f).onchange = e => go(catKey, e.target.value);
     $('#fCat', f).onchange = e => go(e.target.value, block);
+    wireGroupSelects(f, '#/', catKey, block);
 
     const chips = h('<div class="chips"></div>');
     v.append(chips);
@@ -871,7 +953,7 @@ function pageData(v) {
             <strong>Drag &amp; drop the Excel file(s) here</strong>
             <span class="help">or</span>
             <span class="btn primary">Browse files</span>
-            <span class="help drop-note">.xlsx &middot; <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> or <code>Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx</code> &middot; several files can be uploaded together</span>
+            <span class="help drop-note">.xlsx &middot; <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> or <code>Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx</code>, and the School Search <code>.csv</code> (school master) &middot; several files can be uploaded together</span>
         </label>
         <div class="upload-opts">
             <div class="field">
@@ -918,6 +1000,25 @@ function pageData(v) {
     tList.onclick = onDel;
     sList.onclick = onDel;
 
+    const mi = state.masterInfo;
+    const mBox = card(v, 'School master (Management / Category / Type)');
+    const unmatched = kind => { const s = state.mods[kind].snaps; const last = s[s.length - 1]; return last ? last.schools.filter(x => !state.master || !state.master.has(x.u)).length : null; };
+    const um = ['teacher', 'school'].map(k => [k, unmatched(k)]).filter(([, n]) => n != null);
+    mBox.append(h(`<div class="help" style="font-size:13px">
+        <p>The <b>Management</b>, <b>Category</b> and <b>Type</b> of each school come from the School Search export
+        (columns UDISE Code, Management, Category, Type), matched by UDISE code. Upload a newer CSV here at any time; it replaces the one in use in this browser.</p>
+        ${mi ? `<p>In use: <b>${esc(mi.fileName)}</b> ${mi.source === 'repo' ? '<span class="badge repo">from repo</span>' : `(uploaded ${new Date(mi.uploadedAt).toLocaleString('en-IN')})`} &middot; ${fmtN(mi.count)} schools</p>
+            <p>${um.map(([k, n]) => `${MODS[k]} (latest day): ${n ? `<span class="down">${fmtN(n)} school(s) not found in the master</span>` : 'all schools matched'}`).join(' &middot; ')}</p>
+            ${mi.source === 'repo' ? '' : '<p><button class="btn sm danger" id="mDel">Remove uploaded master</button></p>'}`
+        : '<p class="down">No school master loaded. Upload the School Search CSV to enable the Management / Category reports.</p>'}
+    </div>`));
+    if ($('#mDel', mBox)) $('#mDel', mBox).onclick = async () => {
+        if (!confirm('Remove the uploaded school master from this browser?')) return;
+        await DB.del('meta', 'master');
+        await reload();
+        toast('School master removed');
+    };
+
     const bk = card(v, 'Backup & restore');
     bk.append(h(`<div><p class="help">Uploaded data is saved only in this browser. Download a backup regularly, and restore it on another phone or computer.</p>
         <div class="actions"><button class="btn primary" id="bkDown">&#11015; Download backup (.json)</button>
@@ -932,6 +1033,7 @@ function pageData(v) {
             app: 'prashast-monitor', version: 2, exported: new Date().toISOString(),
             snapshots: teacher.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, t, o }) => ({ b, n, u, t, o })) })),
             schoolSnapshots: school.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, st }) => ({ b, n, u, st })) })),
+            master: (await DB.all('meta')).find(x => x.key === 'master') || null,
         };
         download(new Blob([JSON.stringify(data)], { type: 'application/json' }), `prashast-monitor-backup_${new Date().toISOString().slice(0, 10)}.json`);
     };
@@ -944,6 +1046,7 @@ function pageData(v) {
             const school = Array.isArray(data.schoolSnapshots) ? data.schoolSnapshots : [];
             for (const s of data.snapshots) await DB.put('teacher', { ...s, source: 'upload' });
             for (const s of school) await DB.put('school', { ...s, source: 'upload' });
+            if (data.master) await DB.put('meta', data.master);
             await reload();
             toast(`Restored ${data.snapshots.length} teacher day(s) and ${school.length} school day(s)`);
         } catch (err) { toast('Restore failed: ' + err.message, true); }
@@ -952,6 +1055,7 @@ function pageData(v) {
         if (!confirm('Delete ALL uploaded data (teacher and school onboarding) from this browser? Download a backup first if needed.')) return;
         await DB.clear('teacher');
         await DB.clear('school');
+        await DB.clear('meta');
         await reload();
         toast('All uploaded data deleted');
     };
@@ -1071,6 +1175,7 @@ function sDashboard(v) {
     const mini = [C.rank, C.block, SC.schools, SC.o, C.p, col(SC.dO, { h: 'Change' })];
     tableCard(g2, sTitle('Top 5 Leading Blocks'), { cols: mini, rows: ranked.slice(0, 5), onRow: sGo }, plainSub(S, P));
     tableCard(g2, sTitle('Bottom 5 Lagging Blocks'), { cols: mini, rows: ranked.slice(-5).reverse(), onRow: sGo }, plainSub(S, P));
+    groupSummary(v, S, P);
 }
 
 function sBlocks(v) {
@@ -1104,28 +1209,32 @@ function sSchools(v, r) {
     const block = r.q.get('block') || '';
     let search = '';
     const all = schoolRows(S, P);
-    const filtered = () => all.filter(x => (!block || x.b === block) && (catKey === 'all' || x.c === catKey) &&
+    const gf = groupParams(r);
+    const filtered = () => all.filter(x => (!block || x.b === block) && (catKey === 'all' || x.c === catKey) && inGroups(x, gf) &&
         (!search || (x.n + ' ' + x.u).toLowerCase().includes(search)));
-    const title = sTitle(ST[catKey] + (block ? ` - ${block} Block` : ''));
-    const go = (c, b) => { location.hash = `#/s/schools${c && c !== 'all' ? '/' + c : ''}${b ? '?block=' + encodeURIComponent(b) : ''}`; };
+    const heading = ST[catKey] + (block ? ` - ${block} Block` : '') + groupTitle(gf);
+    const title = sTitle(heading);
+    const go = (c, b) => { location.hash = listHash('#/s/', c, b, gf); };
 
     const cols = [C.idx];
     if (!block) cols.push(C.sb);
-    cols.push(C.school, C.udise, SC.st);
+    cols.push(C.school, C.udise, ...groupCols(), SC.st);
     if (P) cols.push({ k: 'cPrev', h: `Status on ${fmtD(P.date)}`, type: 'cat' },
         { k: 'move', h: 'Change', v: x => (x.cPrev == null ? 'New' : x.dO > 0 ? 'Newly onboarded' : x.dO < 0 ? 'Reverted' : '') });
 
     const tbl = makeTable({ cols, rows: filtered(), pageSize: 50 });
-    pageHead(v, ST[catKey] + (block ? ` - ${block} Block` : ''), subLine(S, P), exportBtns(tableSpec(tbl, () => title + (search ? ` (search: ${search})` : ''), plainSub(S, P))));
+    pageHead(v, heading, subLine(S, P), exportBtns(tableSpec(tbl, () => title + (search ? ` (search: ${search})` : ''), plainSub(S, P))));
 
     const f = h(`<div class="filters">
         <label>Block<select id="fBlock"><option value="">All blocks</option>${blockNames().map(b => `<option${b === block ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
         <label>Status<select id="fCat">${Object.keys(ST).map(k => `<option value="${k}"${k === catKey ? ' selected' : ''}>${k === 'all' ? 'All statuses' : CAT[k]}</option>`).join('')}</select></label>
+        ${groupSelects(S, gf)}
         <label>Search school / UDISE<input type="search" id="fSearch" placeholder="Type to search..."></label>
     </div>`);
     v.append(f);
     $('#fBlock', f).onchange = e => go(catKey, e.target.value);
     $('#fCat', f).onchange = e => go(e.target.value, block);
+    wireGroupSelects(f, '#/s/', catKey, block);
 
     const chips = h('<div class="chips"></div>');
     v.append(chips);
@@ -1278,6 +1387,109 @@ function sTrend(v) {
     draw('p');
 }
 
+// ================================================================ Management / Category-wise report (both modules)
+const groupColsFor = (school, label) => {
+    const g = col(C.block, { h: label, cls: 'wrap' });
+    return school
+        ? [C.idx, g, SC.schools, SC.o, SC.pend, C.p, SC.dO, C.dP]
+        : [C.idx, g, C.schools, C.t, C.o, col(C.pend, { invert: true }), C.p, C.dO, C.dP, C.full, C.part, C.zero];
+};
+const groupLink = (school, by, block) => r => {
+    const q = new URLSearchParams({ [by]: r.block });
+    if (block) q.set('block', block);
+    location.hash = `${school ? '#/s/' : '#/'}schools?${q}`;
+};
+
+function pageGroups(v, r) {
+    const S = cur(), P = prev(), school = state.mod === 'school';
+    const by = GROUPS[r.q.get('by')] ? r.q.get('by') : 'mg';
+    const block = r.q.get('block') || '';
+    const label = GROUPS[by];
+    const base = school ? '#/s/' : '#/';
+    const title = `${MODS[state.mod]} - ${label}-wise Report${block ? ` - ${block} Block` : ''}`;
+    pageHead(v, `${label}-wise Report (${MODS[state.mod]})`, subLine(S, P) + ' &middot; tap a row to see its schools');
+    if (!state.master) {
+        v.append(h('<div class="card"><div class="card-body">The school master is not loaded. Upload the School Search CSV (with <b>Management</b> and <b>Category</b> columns) on <a href="#/data">Upload / Manage Data</a>.</div></div>'));
+        return;
+    }
+
+    const f = h(`<div class="filters">
+        <label>Report by<select id="gBy">${Object.entries(GROUPS).map(([k, t]) => `<option value="${k}"${k === by ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+        <label>Block<select id="gBlock"><option value="">All blocks</option>${blockNames().map(b => `<option${b === block ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+    </div>`);
+    v.append(f);
+    const go = (b, bl) => { location.hash = `${base}groups?by=${b}${bl ? '&block=' + encodeURIComponent(bl) : ''}`; };
+    $('#gBy', f).onchange = e => go(e.target.value, block);
+    $('#gBlock', f).onchange = e => go(by, e.target.value);
+
+    const rows = groupRows(S, P, by, block);
+    const foot = totalsRow(rows);
+    if (P) foot.dP = foot.p - totalsRow(groupRows(P, null, by, block)).p;
+    tableCard(v, title, { cols: groupColsFor(school, label), rows, foot, sort: 'schools', onRow: groupLink(school, by, block) }, plainSub(S, P));
+
+    chart(card(v, `Onboarded % by ${label}`), Math.max(220, rows.length * 34 + 60), {
+        type: 'bar',
+        data: {
+            labels: rows.map(g => (by === 'ct' ? shortCat(g.block) : g.block)),
+            datasets: [{ label: 'Onboarded %', data: rows.map(g => round2(g.p)), backgroundColor: rows.map(g => COLORS[pctCls(g.p)] || COLORS.brand2), borderRadius: 4, maxBarThickness: 26 }],
+        },
+        options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, max: 100, ticks: { callback: x => x + '%' } }, y: { ticks: { autoSkip: false } } } },
+    });
+
+    // Block x group matrix
+    const groups = rows.map(g => g.block);
+    const metrics = school
+        ? [['p', 'Onboarded %'], ['o', 'Schools onboarded'], ['pend', 'Pending schools'], ['schools', 'Total schools']]
+        : [['p', 'Onboarded %'], ['o', 'Teachers onboarded'], ['pend', 'Pending teachers'], ['zero', '0% schools'], ['full', '100% schools'], ['schools', 'Total schools']];
+    const box = card(v, `Block-wise by ${label}`);
+    const sel = h(`<div class="filters"><label>Show<select>${metrics.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></label></div>`);
+    const holder = h('<div></div>');
+    box.append(sel, holder);
+    const cells = new Map(); // "block|group" -> aggregate
+    S.schools.forEach(x => {
+        const key = x.b + '|' + groupOf(x, by);
+        if (!cells.has(key)) cells.set(key, blank(key));
+        addTo(cells.get(key), x);
+    });
+    cells.forEach(finish);
+    const draw = metric => {
+        holder.innerHTML = '';
+        const type = metric === 'p' ? 'p' : 'n';
+        const head = g => (by === 'ct' ? shortCat(g) : g);
+        const cols = [C.idx, C.block, ...groups.map((g, i) => ({ k: 'g' + i, h: head(g), type })), { k: 'all', h: 'All', type }];
+        const mrows = S.blocks.map(b => {
+            const row = { block: b.block, all: b[metric] };
+            groups.forEach((g, i) => { const c = cells.get(b.block + '|' + g); row['g' + i] = c ? c[metric] : null; });
+            return row;
+        });
+        const dist = groupRows(S, null, by, '');
+        const mfoot = { block: 'District Total', all: S.total[metric] };
+        groups.forEach((g, i) => { const d = dist.find(x => x.block === g); mfoot['g' + i] = d ? d[metric] : null; });
+        const tbl = makeTable({ cols, rows: mrows, foot: mfoot });
+        const bar = h('<div class="actions" style="margin-bottom:8px"></div>');
+        const mLabel = sel.querySelector('option:checked').textContent;
+        bar.append(exportBtns(tableSpec(tbl, `${MODS[state.mod]} - Block-wise by ${label} - ${mLabel}`, plainSub(S, P))));
+        holder.append(bar, tbl.el);
+    };
+    $('select', sel).onchange = e => draw(e.target.value);
+    draw('p');
+    if (by === 'ct') v.append(h(`<p class="help">Category codes: ${groups.filter(g => g !== NO_MASTER).map(g => `<b>${esc(shortCat(g))}</b> = ${esc(g)}`).join(' &middot; ')}</p>`));
+}
+
+// Management and Category summary tables shown at the end of both dashboards
+function groupSummary(v, S, P) {
+    if (!state.master) return;
+    const school = state.mod === 'school';
+    const g = h('<div class="grid-2" style="margin-top:16px"></div>');
+    v.append(g);
+    ['mg', 'ct'].forEach(by => {
+        const label = GROUPS[by];
+        const cols = [col(C.block, { h: label, cls: 'wrap', v: by === 'ct' ? x => shortCat(x.block) : null }), school ? SC.schools : C.t, school ? SC.o : C.o, C.p, col(C.dO, { h: 'Change' })];
+        const tbl = tableCard(g, `${MODS[state.mod]} by ${label}`, { cols, rows: groupRows(S, P, by, ''), sort: school ? 'schools' : 't', onRow: () => { location.hash = `${school ? '#/s/' : '#/'}groups?by=${by}`; } }, plainSub(S, P));
+        tbl.el.append(h(`<p class="help" style="padding:0 16px 12px"><a href="${school ? '#/s/' : '#/'}groups?by=${by}">Full ${label.toLowerCase()}-wise report &rsaquo;</a></p>`));
+    });
+}
+
 function emptyState() {
     const school = state.mod === 'school';
     return h(`<div class="card empty-state"><h2>No ${school ? 'school onboarding' : 'teacher onboarding'} data yet</h2>
@@ -1294,11 +1506,20 @@ async function handleFiles(files) {
     const override = $('#upDate') && $('#upDate').value;
     if (override && files.length > 1) { toast('Pick a date only when uploading a single file.', true); return; }
     const kinds = new Set();
+    let masterChanged = false;
     for (const f of files) {
         try {
+            const buf = await f.arrayBuffer();
+            const master = parseMaster(buf);
+            if (master) {
+                await DB.put('meta', { key: 'master', fileName: f.name, uploadedAt: new Date().toISOString(), rows: master });
+                masterChanged = true;
+                toast(`School master ${f.name}: ${fmtN(master.length)} schools loaded`);
+                continue;
+            }
             const date = override || dateFromName(f.name);
             if (!date) throw new Error('no date in the file name; choose the "Data date" and upload again');
-            const { kind, schools } = parseWorkbook(await f.arrayBuffer());
+            const { kind, schools } = parseWorkbook(buf);
             const exists = state.mods[kind].snaps.find(s => s.date === date && s.source !== 'repo');
             if (exists && !confirm(`${MODS[kind]} data for ${fmtD(date)} already exists. Replace it with ${f.name}?`)) continue;
             await DB.put(kind, { date, fileName: f.name, uploadedAt: new Date().toISOString(), source: 'upload', schools });
@@ -1309,7 +1530,7 @@ async function handleFiles(files) {
             toast(`${f.name}: ${e.message}`, true);
         }
     }
-    if (kinds.size) await reload(kinds);
+    if (kinds.size || masterChanged) await reload(kinds);
 }
 
 // ---------------------------------------------------------------- data loading
@@ -1333,10 +1554,23 @@ async function loadRepo() {
     } catch (e) { return []; }
 }
 
-let repoSnaps = null;
+// School master: data/school_master.csv in the repo, overridden by an uploaded master in this browser
+async function loadRepoMaster() {
+    try {
+        const r = await fetch('data/school_master.csv', { cache: 'no-store' });
+        if (!r.ok) return null;
+        const rows = parseMaster(await r.arrayBuffer());
+        return rows ? { fileName: 'school_master.csv', source: 'repo', rows } : null;
+    } catch (e) { return null; }
+}
+
+let repoSnaps = null, repoMaster;
 // jumpTo: a Set of modules whose date should move to their latest day (after an upload)
 async function reload(jumpTo) {
-    if (repoSnaps === null) repoSnaps = await loadRepo();
+    if (repoSnaps === null) [repoSnaps, repoMaster] = await Promise.all([loadRepo(), loadRepoMaster()]);
+    const m = (await DB.all('meta')).find(x => x.key === 'master') || repoMaster;
+    state.master = m ? new Map(m.rows.map(x => [x.u, x])) : null;
+    state.masterInfo = m ? { fileName: m.fileName, source: m.source || 'upload', uploadedAt: m.uploadedAt, count: m.rows.length } : null;
     const active = state.mod;
     for (const kind of Object.keys(MODS)) {
         const local = await DB.all(kind);
@@ -1372,8 +1606,8 @@ function fillDateSelects() {
 // ---------------------------------------------------------------- routing
 // Teacher pages: #/<page>, school pages: #/s/<page>, the data page (#/data) is shared and keeps the active module
 const routes = {
-    teacher: { dashboard: pageDashboard, blocks: pageBlocks, schools: pageSchools, compare: pageCompare, trend: pageTrend, rank: pageRank, data: pageData },
-    school: { dashboard: sDashboard, blocks: sBlocks, schools: sSchools, compare: sCompare, trend: sTrend, rank: sRank, data: pageData },
+    teacher: { dashboard: pageDashboard, blocks: pageBlocks, schools: pageSchools, compare: pageCompare, trend: pageTrend, rank: pageRank, groups: pageGroups, data: pageData },
+    school: { dashboard: sDashboard, blocks: sBlocks, schools: sSchools, compare: sCompare, trend: sTrend, rank: sRank, groups: pageGroups, data: pageData },
 };
 
 function parseHash() {
