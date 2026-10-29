@@ -1,14 +1,26 @@
-/* PRASHAST Teacher Onboarding Monitor - SSM, Purba Bardhaman
+/* PRASHAST Onboarding Monitor - SSM, Purba Bardhaman
+ * Two modules: Teacher Onboarding (teachers per school) and School Onboarding
+ * (Completed / Pending status per school).
  * Static app (GitHub Pages). Daily snapshots are stored in IndexedDB and can
  * also be published for everyone through data/manifest.json in the repo. */
 'use strict';
 
 const HEADER = 'Prashast On boarding status :: SSM, Purba Bardhaman';
 const CREDIT = 'An in-house production of SSM, Purba Bardhaman';
-const CAT = { full: '100%', part: '1-99%', zero: '0%', na: 'No teachers' };
+const CAT = { full: '100%', part: '1-99%', zero: '0%', na: 'No teachers', done: 'Completed', pending: 'Pending' };
 const NUM_TYPES = new Set(['idx', 'n', 'p', 'd', 'dp']);
+const MODS = { teacher: 'Teacher Onboarding', school: 'School Onboarding' };
 
-const state = { snaps: [], cur: '', prev: '', charts: [], cache: {} };
+// state.snaps / cur / prev always refer to the active module (state.mod)
+const state = {
+    mod: 'teacher',
+    mods: { teacher: { snaps: [], cur: '', prev: '' }, school: { snaps: [], cur: '', prev: '' } },
+    charts: [], cache: {},
+};
+['snaps', 'cur', 'prev'].forEach(k => Object.defineProperty(state, k, {
+    get() { return this.mods[this.mod][k]; },
+    set(v) { this.mods[this.mod][k] = v; },
+}));
 
 // ---------------------------------------------------------------- helpers
 const $ = (s, r = document) => r.querySelector(s);
@@ -58,35 +70,43 @@ function download(blob, name) {
 }
 
 // ---------------------------------------------------------------- storage (IndexedDB, falls back to memory)
+// One object store per module, keyed by date
+const STORES = { teacher: 'snapshots', school: 'school_snapshots' };
 const DB = {
     db: null,
-    mem: new Map(),
+    mem: { teacher: new Map(), school: new Map() },
     open() {
         return new Promise(res => {
             setTimeout(res, 3000); // some browsers/private modes never answer; fall back to memory
             try {
-                const r = indexedDB.open('prashast-monitor', 1);
-                r.onupgradeneeded = () => r.result.createObjectStore('snapshots', { keyPath: 'date' });
+                const r = indexedDB.open('prashast-monitor', 2);
+                r.onupgradeneeded = () => Object.values(STORES).forEach(n => {
+                    if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: 'date' });
+                });
                 r.onsuccess = () => { this.db = r.result; res(); };
                 r.onerror = () => res();
             } catch (e) { res(); }
         });
     },
-    tx(mode, fn) {
+    tx(kind, mode, fn) {
         return new Promise((res, rej) => {
-            const t = this.db.transaction('snapshots', mode);
-            const req = fn(t.objectStore('snapshots'));
+            const t = this.db.transaction(STORES[kind], mode);
+            const req = fn(t.objectStore(STORES[kind]));
             t.oncomplete = () => res(req && req.result);
             t.onerror = () => rej(t.error);
         });
     },
-    all() { return this.db ? this.tx('readonly', s => s.getAll()) : Promise.resolve([...this.mem.values()]); },
-    put(v) { if (!this.db) { this.mem.set(v.date, v); return Promise.resolve(); } return this.tx('readwrite', s => s.put(v)); },
-    del(k) { if (!this.db) { this.mem.delete(k); return Promise.resolve(); } return this.tx('readwrite', s => s.delete(k)); },
-    clear() { if (!this.db) { this.mem.clear(); return Promise.resolve(); } return this.tx('readwrite', s => s.clear()); },
+    all(kind) { return this.db ? this.tx(kind, 'readonly', s => s.getAll()) : Promise.resolve([...this.mem[kind].values()]); },
+    put(kind, v) { if (!this.db) { this.mem[kind].set(v.date, v); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.put(v)); },
+    del(kind, k) { if (!this.db) { this.mem[kind].delete(k); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.delete(k)); },
+    clear(kind) { if (!this.db) { this.mem[kind].clear(); return Promise.resolve(); } return this.tx(kind, 'readwrite', s => s.clear()); },
 };
 
 // ---------------------------------------------------------------- Excel parsing
+// Returns { kind: 'teacher' | 'school', schools }. The kind is detected from the columns:
+// teacher files have Total Teachers / Teachers Onboarded, school files have a Status column.
+const isDone = st => /^(completed?|onboarded|yes)$/i.test(String(st).trim());
+
 function parseWorkbook(buf) {
     const wb = XLSX.read(buf, { type: 'array' });
     const names = [...wb.SheetNames].sort((a, b) => /all schools/i.test(b) - /all schools/i.test(a));
@@ -101,7 +121,9 @@ function parseWorkbook(buf) {
         const iUdise = find(x => /udise/i.test(x), x => !/school\s*name/i.test(x));
         const iTotal = find(x => /total/i.test(x));
         const iOnb = find(x => /onboarded/i.test(x), x => !/%|percent/i.test(x));
-        if (iTotal < 0 || iOnb < 0) throw new Error(`Sheet "${name}": "Total Teachers" / "Teachers Onboarded" columns not found`);
+        const iStatus = find(x => /status/i.test(x));
+        const kind = iTotal >= 0 && iOnb >= 0 ? 'teacher' : iStatus >= 0 ? 'school' : null;
+        if (!kind) throw new Error(`Sheet "${name}": neither "Total Teachers" / "Teachers Onboarded" nor "Status" columns found`);
         const schools = [];
         for (const r of rows.slice(hi + 1)) {
             let n = String(r[iSchool] ?? '').trim();
@@ -110,9 +132,11 @@ function parseWorkbook(buf) {
             const k = n.lastIndexOf('|');
             if (!u && k >= 0) { u = n.slice(k + 1).trim(); n = n.slice(0, k).trim(); }
             const b = iBlock >= 0 ? String(r[iBlock] ?? '').trim() : '';
-            schools.push({ b: b || 'UNKNOWN', n, u, t: num(r[iTotal]), o: num(r[iOnb]) });
+            schools.push(kind === 'teacher'
+                ? { b: b || 'UNKNOWN', n, u, t: num(r[iTotal]), o: num(r[iOnb]) }
+                : { b: b || 'UNKNOWN', n, u, st: String(r[iStatus] ?? '').trim() || 'Pending' });
         }
-        if (schools.length) return schools;
+        if (schools.length) return { kind, schools };
     }
     throw new Error('No sheet with a "School Name" column was found');
 }
@@ -124,16 +148,19 @@ function category(x) {
     if (x.o <= 0) return 'zero';
     return 'part';
 }
-const blank = block => ({ block, schools: 0, t: 0, o: 0, full: 0, part: 0, zero: 0, na: 0 });
+const blank = block => ({ block, schools: 0, t: 0, o: 0, full: 0, part: 0, zero: 0, na: 0, done: 0, pending: 0 });
 function addTo(a, x) { a.schools++; a.t += x.t; a.o += x.o; a[x.c]++; }
 function finish(a) { a.p = pct(a.o, a.t); a.pend = Math.max(0, a.t - a.o); return a; }
 
+// In the school module every school counts as t = 1 and o = 1 when its status is Completed,
+// so block / district totals, %, ranking and comparisons work the same way as for teachers.
 function enrich(s) {
     if (!s || s._e) return s;
     const blocks = new Map();
     const T = blank('District Total');
     s.schools.forEach(x => {
-        x.c = category(x);
+        if (s.kind === 'school') { x.t = 1; x.o = isDone(x.st) ? 1 : 0; x.c = x.o ? 'done' : 'pending'; }
+        else x.c = category(x);
         x.p = pct(x.o, x.t);
         x.pend = Math.max(0, x.t - x.o);
         x.k = x.u || x.b + '|' + x.n;
@@ -155,6 +182,7 @@ const prev = () => (state.prev ? snap(state.prev) : null);
 const blockNames = () => cur().blocks.map(b => b.block);
 
 function memo(key, fn) {
+    key = state.mod + '|' + key;
     if (!(key in state.cache)) state.cache[key] = fn();
     return state.cache[key];
 }
@@ -190,7 +218,7 @@ function schoolRows(S, P) {
 
 function totalsRow(rows, label = 'District Total') {
     const T = blank(label);
-    rows.forEach(r => { T.schools += r.schools ?? 1; T.t += r.t; T.o += r.o; ['full', 'part', 'zero', 'na'].forEach(k => { T[k] += r[k] || 0; }); });
+    rows.forEach(r => { T.schools += r.schools ?? 1; T.t += r.t; T.o += r.o; ['full', 'part', 'zero', 'na', 'done', 'pending'].forEach(k => { T[k] += r[k] || 0; }); });
     finish(T);
     T.dO = rows.some(r => r.dO != null) ? rows.reduce((s, r) => s + (r.dO || 0), 0) : null;
     return T;
@@ -833,7 +861,7 @@ function pageRank(v) {
 }
 
 function pageData(v) {
-    pageHead(v, 'Upload / Manage Data', 'Upload the combined Excel file every day. One file is kept per date.');
+    pageHead(v, 'Upload / Manage Data', 'Upload the combined Excel files every day. One file is kept per date for each module; the module is detected from the file.');
 
     const up = card(v, 'Upload daily Excel');
     up.append(h(`<div class="upload">
@@ -843,7 +871,7 @@ function pageData(v) {
             <strong>Drag &amp; drop the Excel file(s) here</strong>
             <span class="help">or</span>
             <span class="btn primary">Browse files</span>
-            <span class="help drop-note">.xlsx &middot; e.g. <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> &middot; several days can be uploaded together</span>
+            <span class="help drop-note">.xlsx &middot; <code>Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx</code> or <code>Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx</code> &middot; several files can be uploaded together</span>
         </label>
         <div class="upload-opts">
             <div class="field">
@@ -862,28 +890,49 @@ function pageData(v) {
     drop.ondragleave = () => drop.classList.remove('over');
     drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); handleFiles([...e.dataTransfer.files]); };
 
-    const rows = state.snaps.map(s => { const e = enrich(s); return { date: s.date, file: s.fileName || '', src: s.source, schools: e.total.schools, t: e.total.t, o: e.total.o, p: e.total.p, full: e.total.full, zero: e.total.zero }; }).reverse();
-    const list = card(v, `Uploaded data (${rows.length} day${rows.length === 1 ? '' : 's'})`, null, true);
-    list.append(h(`<div class="table-wrap"><table><thead><tr><th>Date</th><th>File</th><th class="num">Schools</th><th class="num">Teachers</th><th class="num">Onboarded</th><th class="num">%</th><th class="num">100%</th><th class="num">0%</th><th></th></tr></thead><tbody>
-        ${rows.map(r => `<tr><td class="nowrap"><b>${fmtD(r.date)}</b></td><td>${esc(r.file)} ${r.src === 'repo' ? '<span class="badge repo">from repo</span>' : ''}</td><td class="num">${fmtN(r.schools)}</td><td class="num">${fmtN(r.t)}</td><td class="num">${fmtN(r.o)}</td><td class="num">${fmtP(r.p)}</td><td class="num">${fmtN(r.full)}</td><td class="num">${fmtN(r.zero)}</td>
-        <td class="nowrap">${r.src === 'repo' ? '' : `<button class="btn sm danger" data-del="${r.date}">Delete</button>`}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">No data uploaded yet</td></tr>'}
+    const delBtn = (kind, r) => (r.src === 'repo' ? '' : `<button class="btn sm danger" data-kind="${kind}" data-del="${r.date}">Delete</button>`);
+    const fileCell = r => `${esc(r.file)} ${r.src === 'repo' ? '<span class="badge repo">from repo</span>' : ''}`;
+    const listed = kind => state.mods[kind].snaps.map(s => { const e = enrich(s); return { date: s.date, file: s.fileName || '', src: s.source, ...e.total }; }).reverse();
+
+    const tRows = listed('teacher');
+    const tList = card(v, `Teacher Onboarding data (${tRows.length} day${tRows.length === 1 ? '' : 's'})`, null, true);
+    tList.append(h(`<div class="table-wrap"><table><thead><tr><th>Date</th><th>File</th><th class="num">Schools</th><th class="num">Teachers</th><th class="num">Onboarded</th><th class="num">%</th><th class="num">100%</th><th class="num">0%</th><th></th></tr></thead><tbody>
+        ${tRows.map(r => `<tr><td class="nowrap"><b>${fmtD(r.date)}</b></td><td>${fileCell(r)}</td><td class="num">${fmtN(r.schools)}</td><td class="num">${fmtN(r.t)}</td><td class="num">${fmtN(r.o)}</td><td class="num">${fmtP(r.p)}</td><td class="num">${fmtN(r.full)}</td><td class="num">${fmtN(r.zero)}</td>
+        <td class="nowrap">${delBtn('teacher', r)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">No data uploaded yet</td></tr>'}
     </tbody></table></div>`));
-    list.onclick = async e => {
+
+    const sRows = listed('school');
+    const sList = card(v, `School Onboarding data (${sRows.length} day${sRows.length === 1 ? '' : 's'})`, null, true);
+    sList.append(h(`<div class="table-wrap"><table><thead><tr><th>Date</th><th>File</th><th class="num">Schools</th><th class="num">Completed</th><th class="num">Pending</th><th class="num">%</th><th></th></tr></thead><tbody>
+        ${sRows.map(r => `<tr><td class="nowrap"><b>${fmtD(r.date)}</b></td><td>${fileCell(r)}</td><td class="num">${fmtN(r.schools)}</td><td class="num">${fmtN(r.o)}</td><td class="num">${fmtN(r.pend)}</td><td class="num">${fmtP(r.p)}</td>
+        <td class="nowrap">${delBtn('school', r)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No data uploaded yet</td></tr>'}
+    </tbody></table></div>`));
+
+    const onDel = async e => {
         const b = e.target.closest('[data-del]');
-        if (!b || !confirm(`Delete data of ${fmtD(b.dataset.del)}?`)) return;
-        await DB.del(b.dataset.del);
+        if (!b || !confirm(`Delete ${MODS[b.dataset.kind]} data of ${fmtD(b.dataset.del)}?`)) return;
+        await DB.del(b.dataset.kind, b.dataset.del);
         await reload();
         toast('Deleted');
     };
+    tList.onclick = onDel;
+    sList.onclick = onDel;
 
     const bk = card(v, 'Backup & restore');
     bk.append(h(`<div><p class="help">Uploaded data is saved only in this browser. Download a backup regularly, and restore it on another phone or computer.</p>
         <div class="actions"><button class="btn primary" id="bkDown">&#11015; Download backup (.json)</button>
         <label class="btn">&#11014; Restore backup<input type="file" id="bkUp" accept=".json" hidden></label>
         <button class="btn danger" id="bkClear">Delete all uploaded data</button></div></div>`));
+    // Backup v2: "snapshots" = teacher data (same as v1), "schoolSnapshots" = school data
     $('#bkDown', bk).onclick = async () => {
-        const local = (await DB.all()).sort(byDate);
-        const data = { app: 'prashast-monitor', version: 1, exported: new Date().toISOString(), snapshots: local.map(s => ({ date: s.date, fileName: s.fileName, uploadedAt: s.uploadedAt, schools: s.schools.map(({ b, n, u, t, o }) => ({ b, n, u, t, o })) })) };
+        const meta = s => ({ date: s.date, fileName: s.fileName, uploadedAt: s.uploadedAt });
+        const teacher = (await DB.all('teacher')).sort(byDate);
+        const school = (await DB.all('school')).sort(byDate);
+        const data = {
+            app: 'prashast-monitor', version: 2, exported: new Date().toISOString(),
+            snapshots: teacher.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, t, o }) => ({ b, n, u, t, o })) })),
+            schoolSnapshots: school.map(s => ({ ...meta(s), schools: s.schools.map(({ b, n, u, st }) => ({ b, n, u, st })) })),
+        };
         download(new Blob([JSON.stringify(data)], { type: 'application/json' }), `prashast-monitor-backup_${new Date().toISOString().slice(0, 10)}.json`);
     };
     $('#bkUp', bk).onchange = async e => {
@@ -892,14 +941,17 @@ function pageData(v) {
         try {
             const data = JSON.parse(await f.text());
             if (!Array.isArray(data.snapshots)) throw new Error('Not a backup file of this portal');
-            for (const s of data.snapshots) await DB.put({ ...s, source: 'upload' });
+            const school = Array.isArray(data.schoolSnapshots) ? data.schoolSnapshots : [];
+            for (const s of data.snapshots) await DB.put('teacher', { ...s, source: 'upload' });
+            for (const s of school) await DB.put('school', { ...s, source: 'upload' });
             await reload();
-            toast(`Restored ${data.snapshots.length} day(s)`);
+            toast(`Restored ${data.snapshots.length} teacher day(s) and ${school.length} school day(s)`);
         } catch (err) { toast('Restore failed: ' + err.message, true); }
     };
     $('#bkClear', bk).onclick = async () => {
-        if (!confirm('Delete ALL uploaded data from this browser? Download a backup first if needed.')) return;
-        await DB.clear();
+        if (!confirm('Delete ALL uploaded data (teacher and school onboarding) from this browser? Download a backup first if needed.')) return;
+        await DB.clear('teacher');
+        await DB.clear('school');
         await reload();
         toast('All uploaded data deleted');
     };
@@ -909,15 +961,329 @@ function pageData(v) {
         <p>Data uploaded here stays on this device. To let every officer who opens the portal see the same history, add the daily files to the repository:</p>
         <ol>
             <li>Put the Excel file in the <code>data/</code> folder of the repository (keep the date in the file name).</li>
-            <li>Add the file name to <code>data/manifest.json</code>, for example:<br><code>["Teacher_Onboarding_School_Wise_All_Blocks_2026-10-27.xlsx", "Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx"]</code></li>
+            <li>Add the file name to <code>data/manifest.json</code>. Teacher and school files go in the same list; the module is detected from the columns, for example:<br><code>["Teacher_Onboarding_School_Wise_All_Blocks_2026-10-28.xlsx", "Schools_Onboarding_Status_All_Blocks_2026-10-29.xlsx"]</code></li>
             <li>Commit. GitHub Pages updates in a minute or two; those dates then show as <span class="badge repo">from repo</span> for everyone.</li>
         </ol>
     </div>`));
 }
 
+// ================================================================ School Onboarding module
+// Each school: t = 1, o = 1 if Completed. Block rows: schools, o (onboarded), pend, p.
+const SC = {
+    schools: col(C.schools, { h: 'Total Schools' }),
+    o: col(C.o, { h: 'Schools Onboarded' }),
+    pend: col(C.pend, { h: 'Pending Schools', invert: true }),
+    p: C.p,
+    dO: col(C.dO, { h: 'Change (Onb.)' }),
+    st: col(C.cat, { h: 'Status' }),
+};
+const ST = { all: 'All Schools', done: 'Onboarded Schools (Completed)', pending: 'Pending Schools' };
+const sTitle = t => `School Onboarding - ${t}`;
+const sGo = r => { location.hash = '#/s/schools?block=' + encodeURIComponent(r.block || r.b); };
+
+function sDashboard(v) {
+    const S = cur(), P = prev(), T = S.total, PT = P && P.total;
+    const d = k => (PT ? T[k] - PT[k] : null);
+    const ranked = rankedBlocks(S, P);
+    const count = s => ranked.filter(b => b.status === s).length;
+    pageHead(v, 'School Onboarding Dashboard', subLine(S, P));
+
+    const chg = PT ? `<span class="hero-chip ${T.p >= PT.p ? 'pos' : 'neg'}">${icon(T.p >= PT.p ? 'up' : 'down')} ${signed(T.p - PT.p, true)} pt &middot; ${signed(T.o - PT.o)} schools since ${fmtD(P.date)}</span>` : '';
+    v.append(h(`<section class="hero">
+        <div class="ring" style="--p:${Math.min(100, T.p)}"><div class="ring-in"><b>${fmtP(T.p)}%</b><small>onboarded</small></div></div>
+        <div class="hero-main">
+            <div class="hero-label">District school onboarding &middot; Purba Bardhaman</div>
+            <div class="hero-title"><b>${fmtN(T.o)}</b> of ${fmtN(T.schools)} schools onboarded</div>
+            <div class="hero-bar"><span style="width:${Math.min(100, T.p)}%"></span></div>
+            <div class="hero-meta">${fmtN(T.pend)} schools still pending across ${S.blocks.length} blocks</div>
+            ${chg}
+        </div>
+        <div class="hero-stats">
+            <div><b>${S.blocks.length}</b><span>Blocks</span></div>
+            <div><b>${fmtN(T.schools)}</b><span>Schools</span></div>
+            <div><b class="g">${count('Leading')}</b><span>Leading blocks</span></div>
+            <div><b class="r">${count('Lagging')}</b><span>Lagging blocks</span></div>
+        </div>
+    </section>`));
+
+    v.append(h(`<div class="stat-grid">
+        ${statCard({ label: 'Total Schools', value: fmtN(T.schools), delta: d('schools'), foot: `in ${S.blocks.length} blocks`, ic: 'school', tone: 'blue', href: '#/s/schools' })}
+        ${statCard({ label: 'Schools Onboarded', value: fmtN(T.o), delta: d('o'), foot: `status "Completed"`, ic: 'check', tone: 'green', href: '#/s/schools/done' })}
+        ${statCard({ label: 'Pending Schools', value: fmtN(T.pend), delta: d('pend'), invert: true, foot: `${fmtP(100 - T.p)}% yet to onboard`, ic: 'clock', tone: 'red', href: '#/s/schools/pending' })}
+        ${statCard({ label: 'Onboarded %', value: fmtP(T.p) + '%', delta: d('p'), pctDelta: true, foot: `best block ${fmtP(ranked[0].p)}%`, ic: 'up', tone: 'indigo' })}
+    </div>`));
+
+    const best = ranked[0], worst = ranked[ranked.length - 1];
+    const none = ranked.filter(b => b.o === 0).map(b => b.block);
+    const mostPend = [...ranked].sort((a, b) => b.pend - a.pend)[0];
+    const notes = [
+        ['up', `Highest school onboarding: <b>${esc(best.block)}</b> at ${fmtP(best.p)}%; lowest: <b>${esc(worst.block)}</b> at ${fmtP(worst.p)}%.`],
+        ['flag', `Most pending schools: <b>${esc(mostPend.block)}</b> (${fmtN(mostPend.pend)} of ${fmtN(mostPend.schools)} pending). <a href="#/s/schools/pending?block=${encodeURIComponent(mostPend.block)}">See list &rsaquo;</a>`],
+        ['zero', none.length ? `<b>${none.length}</b> block(s) have not onboarded any school: ${none.map(esc).join(', ')}.` : 'Every block has onboarded at least one school.'],
+    ];
+    if (P) {
+        const sr = schoolRows(S, P);
+        const newly = sr.filter(x => x.dO > 0).length;
+        const reverted = sr.filter(x => x.dO < 0).length;
+        const still = ranked.filter(b => b.dO === 0).map(b => b.block);
+        const gainer = [...ranked].sort((a, b) => (b.dO || 0) - (a.dO || 0))[0];
+        notes.unshift(['check', `Since ${fmtD(P.date)}: <b>${fmtN(newly)}</b> schools newly onboarded. <a href="#/s/compare">Details &rsaquo;</a>`]);
+        if (gainer && gainer.dO > 0) notes.push(['up', `Top gainer since ${fmtD(P.date)}: <b>${esc(gainer.block)}</b> (${signed(gainer.dO)} schools).`]);
+        if (still.length) notes.push(['info', `No progress since ${fmtD(P.date)} in ${still.length} block(s): ${still.map(esc).join(', ')}.`]);
+        if (reverted) notes.push(['down', `<span class="down">${fmtN(reverted)} school(s) were Completed on ${fmtD(P.date)} but are Pending now</span> &mdash; please verify.`]);
+    }
+    card(v, 'Key Highlights').append(h(`<ul class="highlights">${notes.map(([i, t]) => `<li><span class="hl-icon">${icon(i)}</span><span>${t}</span></li>`).join('')}</ul>`));
+
+    const g = h('<div class="grid-2"></div>');
+    v.append(g);
+    chart(card(g, 'Schools by Status'), 260, {
+        type: 'doughnut',
+        data: { labels: ['Completed', 'Pending'], datasets: [{ data: [T.o, T.pend], backgroundColor: [COLORS.good, COLORS.bad], borderWidth: 2, borderColor: '#fff' }] },
+        options: { plugins: { legend: { position: window.innerWidth < 600 ? 'bottom' : 'right', labels: { usePointStyle: true, padding: 14 } } }, cutout: '64%' },
+    });
+    const bands = [['Below 10%', 0, 10], ['10-25%', 10, 25], ['25-50%', 25, 50], ['50% and above', 50, 101]];
+    chart(card(g, 'Blocks by School Onboarding Level'), 260, {
+        type: 'bar',
+        data: {
+            labels: bands.map(b => b[0]),
+            datasets: [{ label: 'Blocks', data: bands.map(([, lo, hi]) => ranked.filter(b => b.p >= lo && b.p < hi).length), backgroundColor: [COLORS.bad, COLORS.mid, COLORS.brand2, COLORS.good], borderRadius: 6, maxBarThickness: 56 }],
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: 'Number of blocks' } }, x: { grid: { display: false } } } },
+    });
+    if (state.snaps.length > 1) {
+        const all = state.snaps.map(s => enrich(s));
+        chart(card(v, 'District Daily Trend'), 280, {
+            type: 'line',
+            data: {
+                labels: all.map(s => fmtD(s.date)),
+                datasets: [
+                    { label: 'Onboarded %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: 'rgba(26,35,126,.10)', fill: true, tension: .3, yAxisID: 'y', pointRadius: 3 },
+                    { label: 'Schools onboarded', data: all.map(s => s.total.o), borderColor: COLORS.good, tension: .3, yAxisID: 'y1', pointRadius: 3 },
+                    { label: 'Pending schools', data: all.map(s => s.total.pend), borderColor: COLORS.bad, tension: .3, yAxisID: 'y1', pointRadius: 3 },
+                ],
+            },
+            options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { usePointStyle: true } } }, scales: { y: { ticks: { callback: x => x + '%' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Schools' } } } },
+        });
+    }
+
+    const g2 = h('<div class="grid-2" style="margin-top:16px"></div>');
+    v.append(g2);
+    const mini = [C.rank, C.block, SC.schools, SC.o, C.p, col(SC.dO, { h: 'Change' })];
+    tableCard(g2, sTitle('Top 5 Leading Blocks'), { cols: mini, rows: ranked.slice(0, 5), onRow: sGo }, plainSub(S, P));
+    tableCard(g2, sTitle('Bottom 5 Lagging Blocks'), { cols: mini, rows: ranked.slice(-5).reverse(), onRow: sGo }, plainSub(S, P));
+}
+
+function sBlocks(v) {
+    const S = cur(), P = prev();
+    const rows = rankedBlocks(S, P);
+    const cols = [C.rank, C.block, SC.schools, SC.o, SC.pend, C.p, SC.dO, C.dP, C.status];
+    const foot = Object.assign(totalsRow(rows), { dP: P ? S.total.p - P.total.p : null });
+    const tbl = makeTable({ cols, rows, foot, onRow: sGo });
+    const title = sTitle('Block-wise Status');
+    pageHead(v, 'Block-wise School Onboarding', subLine(S, P) + ' &middot; tap a block to see its schools', exportBtns(tableSpec(tbl, title, plainSub(S, P))));
+    v.append(h(`<p class="help">Status: <span class="badge Leading">Leading</span> = top quarter of blocks by % of schools onboarded, <span class="badge Lagging">Lagging</span> = bottom quarter, <span class="badge Moderate">Moderate</span> = the rest.</p>`));
+    card(v, 'All Blocks', null, true).append(tbl.el);
+
+    const byName = [...rows].sort((a, b) => a.block.localeCompare(b.block));
+    chart(card(v, 'Onboarded and pending schools by block'), Math.max(320, rows.length * 20 + 60), {
+        type: 'bar',
+        data: {
+            labels: byName.map(b => b.block),
+            datasets: [
+                { label: 'Completed', data: byName.map(b => b.o), backgroundColor: COLORS.good },
+                { label: 'Pending', data: byName.map(b => b.pend), backgroundColor: COLORS.bad },
+            ],
+        },
+        options: { indexAxis: 'y', scales: { x: { stacked: true }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } }, interaction: { mode: 'index', intersect: false } },
+    });
+}
+
+function sSchools(v, r) {
+    const S = cur(), P = prev();
+    const catKey = ST[r.arg] ? r.arg : 'all';
+    const block = r.q.get('block') || '';
+    let search = '';
+    const all = schoolRows(S, P);
+    const filtered = () => all.filter(x => (!block || x.b === block) && (catKey === 'all' || x.c === catKey) &&
+        (!search || (x.n + ' ' + x.u).toLowerCase().includes(search)));
+    const title = sTitle(ST[catKey] + (block ? ` - ${block} Block` : ''));
+    const go = (c, b) => { location.hash = `#/s/schools${c && c !== 'all' ? '/' + c : ''}${b ? '?block=' + encodeURIComponent(b) : ''}`; };
+
+    const cols = [C.idx];
+    if (!block) cols.push(C.sb);
+    cols.push(C.school, C.udise, SC.st);
+    if (P) cols.push({ k: 'cPrev', h: `Status on ${fmtD(P.date)}`, type: 'cat' },
+        { k: 'move', h: 'Change', v: x => (x.cPrev == null ? 'New' : x.dO > 0 ? 'Newly onboarded' : x.dO < 0 ? 'Reverted' : '') });
+
+    const tbl = makeTable({ cols, rows: filtered(), pageSize: 50 });
+    pageHead(v, ST[catKey] + (block ? ` - ${block} Block` : ''), subLine(S, P), exportBtns(tableSpec(tbl, () => title + (search ? ` (search: ${search})` : ''), plainSub(S, P))));
+
+    const f = h(`<div class="filters">
+        <label>Block<select id="fBlock"><option value="">All blocks</option>${blockNames().map(b => `<option${b === block ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></label>
+        <label>Status<select id="fCat">${Object.keys(ST).map(k => `<option value="${k}"${k === catKey ? ' selected' : ''}>${k === 'all' ? 'All statuses' : CAT[k]}</option>`).join('')}</select></label>
+        <label>Search school / UDISE<input type="search" id="fSearch" placeholder="Type to search..."></label>
+    </div>`);
+    v.append(f);
+    $('#fBlock', f).onchange = e => go(catKey, e.target.value);
+    $('#fCat', f).onchange = e => go(e.target.value, block);
+
+    const chips = h('<div class="chips"></div>');
+    v.append(chips);
+    const drawChips = rows => {
+        const t = totalsRow(rows);
+        chips.innerHTML = `<span class="chip">Schools <b>${fmtN(rows.length)}</b></span><span class="chip">Completed <b>${fmtN(t.o)}</b></span>
+            <span class="chip">Pending <b>${fmtN(t.pend)}</b></span><span class="chip">Onboarded % <b>${fmtP(t.p)}</b></span>`;
+    };
+    drawChips(tbl.rows());
+    let timer;
+    $('#fSearch', f).oninput = e => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { search = e.target.value.trim().toLowerCase(); const rows = filtered(); tbl.setRows(rows); drawChips(rows); }, 200);
+    };
+    card(v, 'Schools', null, true).append(tbl.el);
+}
+
+function sRank(v) {
+    const S = cur(), P = prev();
+    const ranked = rankedBlocks(S, P);
+    const sub = plainSub(S, P);
+    pageHead(v, 'Leading & Lagging (School Onboarding)', subLine(S, P));
+    const bcols = [C.rank, C.block, SC.schools, SC.o, SC.pend, C.p, SC.dO];
+
+    const g1 = h('<div class="grid-2"></div>');
+    v.append(g1);
+    tableCard(g1, sTitle('Top 10 Leading Blocks'), { cols: bcols, rows: ranked.slice(0, 10), onRow: sGo }, sub);
+    tableCard(g1, sTitle('Bottom 10 Lagging Blocks'), { cols: bcols, rows: ranked.slice(-10).reverse(), onRow: sGo }, sub);
+
+    const g2 = h('<div class="grid-2" style="margin-top:16px"></div>');
+    v.append(g2);
+    if (P) {
+        tableCard(g2, sTitle(`Top Gainers since ${fmtD(P.date)}`), { cols: [C.idx, C.block, SC.dO, C.dP, C.p], rows: [...ranked].sort((a, b) => b.dO - a.dO).slice(0, 10), onRow: sGo }, sub);
+        tableCard(g2, sTitle(`Least Progress since ${fmtD(P.date)}`), { cols: [C.idx, C.block, SC.dO, C.dP, C.p, SC.pend], rows: [...ranked].sort((a, b) => a.dO - b.dO || a.p - b.p).slice(0, 10), onRow: sGo }, sub);
+    }
+    tableCard(g2, sTitle('Blocks with Most Pending Schools'), { cols: [C.idx, C.block, SC.schools, SC.o, SC.pend, C.p], rows: [...ranked].sort((a, b) => b.pend - a.pend).slice(0, 10), onRow: sGo }, sub);
+}
+
+function sCompare(v, r) {
+    if (state.snaps.length < 2) {
+        pageHead(v, 'Day-wise Comparison (School Onboarding)');
+        v.append(h('<div class="card"><div class="card-body">Upload school onboarding data for at least two dates to compare.</div></div>'));
+        return;
+    }
+    const dates = state.snaps.map(s => s.date);
+    const bDate = r.q.get('b') || state.cur;
+    const aDate = r.q.get('a') || state.prev || dates[Math.max(0, dates.indexOf(bDate) - 1)];
+    const A = snap(aDate), B = snap(bDate);
+    const opts = sel => dates.slice().reverse().map(d => `<option value="${d}"${d === sel ? ' selected' : ''}>${fmtD(d)}</option>`).join('');
+    const sub = `${fmtD(A.date)} vs ${fmtD(B.date)}`;
+    pageHead(v, 'Day-wise Comparison (School Onboarding)', `Changes from <b>${fmtD(A.date)}</b> to <b>${fmtD(B.date)}</b>`);
+
+    const f = h(`<div class="filters"><label>From date<select id="cA">${opts(aDate)}</select></label><label>To date<select id="cB">${opts(bDate)}</select></label></div>`);
+    v.append(f);
+    const go = () => { location.hash = `#/s/compare?a=${$('#cA').value}&b=${$('#cB').value}`; };
+    $('#cA', f).onchange = go;
+    $('#cB', f).onchange = go;
+
+    const TA = A.total, TB = B.total;
+    const k = (label, key, o = {}) => `<div class="kpi ${o.cls || ''}"><span class="kpi-label">${label}</span><span class="kpi-val">${o.pct ? fmtP(TB[key]) + '%' : fmtN(TB[key])}</span><span class="kpi-delta">${deltaHtml(TB[key] - TA[key], o.pct, o.invert)} <small>from ${o.pct ? fmtP(TA[key]) + '%' : fmtN(TA[key])}</small></span></div>`;
+    v.append(h(`<div class="kpis">${k('Schools Onboarded', 'o', { cls: 'good' })}${k('Onboarded %', 'p', { pct: true })}${k('Pending Schools', 'pend', { invert: true, cls: 'bad' })}${k('Total Schools', 'schools')}</div>`));
+
+    const names = [...new Set([...A.blocks, ...B.blocks].map(b => b.block))];
+    const rows = names.map(n => {
+        const a = A.byBlock.get(n) || finish(blank(n)), b = B.byBlock.get(n) || finish(blank(n));
+        return { block: n, schools: b.schools, oA: a.o, o: b.o, dO: b.o - a.o, pA: a.p, p: b.p, dP: b.p - a.p, pend: b.pend };
+    });
+    const tot = { block: 'District Total', schools: TB.schools, oA: TA.o, o: TB.o, dO: TB.o - TA.o, pA: TA.p, p: TB.p, dP: TB.p - TA.p, pend: TB.pend };
+    const dA = fmtD(A.date), dB = fmtD(B.date);
+    tableCard(v, sTitle('Block-wise Comparison'), {
+        cols: [C.idx, C.block, SC.schools, { k: 'oA', h: `Onb. ${dA}`, type: 'n' }, { k: 'o', h: `Onb. ${dB}`, type: 'n' }, SC.dO,
+            { k: 'pA', h: `% ${dA}`, type: 'p' }, { k: 'p', h: `% ${dB}`, type: 'p' }, C.dP, SC.pend],
+        rows, sort: 'dO', foot: tot,
+    }, sub);
+
+    const sr = schoolRows(B, A);
+    const groups = [
+        ['Newly onboarded', x => x.dO > 0],
+        ['Still pending on both dates', x => x.c === 'pending' && x.cPrev === 'pending'],
+        ['Completed on both dates', x => x.c === 'done' && x.cPrev === 'done'],
+        ['Reverted to pending', x => x.dO < 0],
+        ['New in later file', x => x.cPrev == null],
+    ].map(([label, fn]) => ({ label, rows: sr.filter(fn) }));
+    let active = groups[0];
+    const cols = [C.idx, C.sb, C.school, C.udise, { k: 'cPrev', h: `Status ${dA}`, type: 'cat' }, { k: 'c', h: `Status ${dB}`, type: 'cat' }];
+    const tbl = makeTable({ cols, rows: active.rows, pageSize: 50 });
+    const body = card(v, 'School-level Movement', exportBtns(() => tableSpec(tbl, sTitle(`School Movement - ${active.label}`), sub)()), true);
+    const tabs = h(`<div class="tabs">${groups.map((g, i) => `<button class="tab${i === 0 ? ' active' : ''}" data-i="${i}">${g.label}<span class="count">${fmtN(g.rows.length)}</span></button>`).join('')}</div>`);
+    tabs.onclick = e => {
+        const b = e.target.closest('.tab');
+        if (!b) return;
+        active = groups[Number(b.dataset.i)];
+        tabs.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
+        tbl.setRows(active.rows);
+    };
+    body.append(tabs, tbl.el);
+}
+
+function sTrend(v) {
+    const all = state.snaps.map(s => enrich(s));
+    const rows = all.map((s, i) => {
+        const p = i ? all[i - 1].total : null, t = s.total;
+        return { date: s.date, schools: t.schools, o: t.o, dO: p ? t.o - p.o : null, p: t.p, dP: p ? t.p - p.p : null, pend: t.pend };
+    }).reverse();
+    pageHead(v, 'Daily Trend (School Onboarding)', `${all.length} day(s) of data, from <b>${fmtD(all[0].date)}</b> to <b>${fmtD(all[all.length - 1].date)}</b>`);
+
+    if (all.length > 1) {
+        chart(card(v, 'District school onboarding by date'), 280, {
+            type: 'bar',
+            data: {
+                labels: all.map(s => fmtD(s.date)),
+                datasets: [
+                    { type: 'line', label: 'Onboarded %', data: all.map(s => round2(s.total.p)), borderColor: COLORS.brand, backgroundColor: COLORS.brand, yAxisID: 'y1', tension: .25 },
+                    { label: 'Schools onboarded', data: all.map(s => s.total.o), backgroundColor: 'rgba(46,125,50,.4)', yAxisID: 'y' },
+                ],
+            },
+            options: { interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: x => x + '%' } } } },
+        });
+    }
+
+    tableCard(v, sTitle('District Date-wise Summary'), {
+        cols: [{ k: 'date', h: 'Date', cls: 'nowrap', show: fmtD }, SC.schools, SC.o, col(SC.dO, { h: 'Daily change' }), C.p, C.dP, SC.pend],
+        rows,
+    });
+
+    const metricBox = card(v, 'Block-wise Trend (by date)');
+    const sel = h('<div class="filters"><label>Show<select><option value="p">Onboarded %</option><option value="o">Schools onboarded</option><option value="pend">Pending schools</option></select></label></div>');
+    metricBox.append(sel);
+    const holder = h('<div></div>');
+    metricBox.append(holder);
+    const draw = metric => {
+        holder.innerHTML = '';
+        const last = all[all.length - 1], first = all[0];
+        const type = metric === 'p' ? 'p' : 'n';
+        const cols = [C.idx, C.block, ...all.map(s => ({ k: s.date, h: fmtD(s.date), type })),
+            { k: 'chg', h: 'Change (first to last)', type: metric === 'p' ? 'dp' : 'd', invert: metric === 'pend' }];
+        const rows = last.blocks.map(b => {
+            const r = { block: b.block };
+            all.forEach(s => { const x = s.byBlock.get(b.block); r[s.date] = x ? x[metric] : null; });
+            r.chg = r[last.date] != null && r[first.date] != null ? r[last.date] - r[first.date] : null;
+            return r;
+        });
+        const label = sel.querySelector('option:checked').textContent;
+        const tbl = makeTable({ cols, rows, sort: last.date });
+        const bar = h('<div class="actions" style="margin-bottom:8px"></div>');
+        bar.append(exportBtns(tableSpec(tbl, sTitle(`Block-wise Trend - ${label}`), `${fmtD(first.date)} to ${fmtD(last.date)}`)));
+        holder.append(bar, tbl.el);
+    };
+    $('select', sel).onchange = e => draw(e.target.value);
+    draw('p');
+}
+
 function emptyState() {
-    return h(`<div class="card empty-state"><h2>No data yet</h2>
-        <p>Upload the combined school-wise Excel file (the one with the <b>Block Name</b> column) to start monitoring.</p>
+    const school = state.mod === 'school';
+    return h(`<div class="card empty-state"><h2>No ${school ? 'school onboarding' : 'teacher onboarding'} data yet</h2>
+        <p>Upload the combined ${school
+        ? '<b>Schools_Onboarding_Status_All_Blocks</b> Excel file (Block Name, School Name, UDISE Code, Status)'
+        : 'school-wise Excel file (the one with the <b>Block Name</b> column)'} to start monitoring.</p>
         <p><a class="btn primary" href="#/data">&#11014; Upload Excel</a></p>
         <p class="help">${CREDIT}</p></div>`);
 }
@@ -927,23 +1293,23 @@ async function handleFiles(files) {
     if (!files.length) return;
     const override = $('#upDate') && $('#upDate').value;
     if (override && files.length > 1) { toast('Pick a date only when uploading a single file.', true); return; }
-    let lastDate = null;
+    const kinds = new Set();
     for (const f of files) {
         try {
             const date = override || dateFromName(f.name);
             if (!date) throw new Error('no date in the file name; choose the "Data date" and upload again');
-            const schools = parseWorkbook(await f.arrayBuffer());
-            const exists = state.snaps.find(s => s.date === date && s.source !== 'repo');
-            if (exists && !confirm(`Data for ${fmtD(date)} already exists. Replace it with ${f.name}?`)) continue;
-            await DB.put({ date, fileName: f.name, uploadedAt: new Date().toISOString(), source: 'upload', schools });
-            lastDate = date;
-            toast(`${fmtD(date)}: ${fmtN(schools.length)} schools loaded`);
+            const { kind, schools } = parseWorkbook(await f.arrayBuffer());
+            const exists = state.mods[kind].snaps.find(s => s.date === date && s.source !== 'repo');
+            if (exists && !confirm(`${MODS[kind]} data for ${fmtD(date)} already exists. Replace it with ${f.name}?`)) continue;
+            await DB.put(kind, { date, fileName: f.name, uploadedAt: new Date().toISOString(), source: 'upload', schools });
+            kinds.add(kind);
+            toast(`${MODS[kind]} ${fmtD(date)}: ${fmtN(schools.length)} schools loaded`);
         } catch (e) {
             console.error(e);
             toast(`${f.name}: ${e.message}`, true);
         }
     }
-    if (lastDate) await reload(true);
+    if (kinds.size) await reload(kinds);
 }
 
 // ---------------------------------------------------------------- data loading
@@ -960,7 +1326,7 @@ async function loadRepo() {
             try {
                 const r = await fetch('data/' + encodeURIComponent(file), { cache: 'no-store' });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
-                out.push({ date, fileName: file, source: 'repo', schools: parseWorkbook(await r.arrayBuffer()) });
+                out.push({ date, fileName: file, source: 'repo', ...parseWorkbook(await r.arrayBuffer()) });
             } catch (err) { toast(`data/${file}: ${err.message}`, true); }
         }
         return out;
@@ -968,16 +1334,22 @@ async function loadRepo() {
 }
 
 let repoSnaps = null;
-async function reload(jumpToLatest) {
+// jumpTo: a Set of modules whose date should move to their latest day (after an upload)
+async function reload(jumpTo) {
     if (repoSnaps === null) repoSnaps = await loadRepo();
-    const local = await DB.all();
-    const map = new Map(repoSnaps.map(s => [s.date, s]));
-    local.forEach(s => map.set(s.date, s)); // uploaded data overrides repo data of the same date
-    state.snaps = [...map.values()].sort(byDate);
+    const active = state.mod;
+    for (const kind of Object.keys(MODS)) {
+        const local = await DB.all(kind);
+        const map = new Map(repoSnaps.filter(s => s.kind === kind).map(s => [s.date, s]));
+        local.forEach(s => map.set(s.date, { ...s, kind })); // uploaded data overrides repo data of the same date
+        state.mod = kind;
+        state.snaps = [...map.values()].sort(byDate);
+        const dates = state.snaps.map(s => s.date);
+        if ((jumpTo && jumpTo.has(kind)) || !dates.includes(state.cur)) setCur(dates[dates.length - 1] || '');
+        else if (state.prev && !dates.includes(state.prev)) setCur(state.cur);
+    }
+    state.mod = active;
     state.cache = {};
-    const dates = state.snaps.map(s => s.date);
-    if (jumpToLatest || !dates.includes(state.cur)) setCur(dates[dates.length - 1] || '');
-    else if (state.prev && !dates.includes(state.prev)) setCur(state.cur);
     fillDateSelects();
     render();
 }
@@ -998,27 +1370,42 @@ function fillDateSelects() {
 }
 
 // ---------------------------------------------------------------- routing
-const routes = { dashboard: pageDashboard, blocks: pageBlocks, schools: pageSchools, compare: pageCompare, trend: pageTrend, rank: pageRank, data: pageData };
+// Teacher pages: #/<page>, school pages: #/s/<page>, the data page (#/data) is shared and keeps the active module
+const routes = {
+    teacher: { dashboard: pageDashboard, blocks: pageBlocks, schools: pageSchools, compare: pageCompare, trend: pageTrend, rank: pageRank, data: pageData },
+    school: { dashboard: sDashboard, blocks: sBlocks, schools: sSchools, compare: sCompare, trend: sTrend, rank: sRank, data: pageData },
+};
 
 function parseHash() {
     const raw = location.hash.replace(/^#\/?/, '');
     const [path, q = ''] = raw.split('?');
     const parts = path.split('/').filter(Boolean);
-    return { name: routes[parts[0]] ? parts[0] : 'dashboard', arg: parts[1] || '', q: new URLSearchParams(q) };
+    const mod = parts[0] === 's' ? 'school' : parts[0] === 'data' ? state.mod : 'teacher';
+    if (parts[0] === 's') parts.shift();
+    return { mod, name: routes[mod][parts[0]] ? parts[0] : 'dashboard', arg: parts[1] || '', q: new URLSearchParams(q) };
+}
+
+function setMod(mod) {
+    if (state.mod === mod) return;
+    state.mod = mod;
+    fillDateSelects();
 }
 
 function render() {
     state.charts.forEach(c => c.destroy());
     state.charts = [];
     const r = parseHash();
-    const key = r.name + (r.arg ? '/' + r.arg : '');
-    document.querySelectorAll('#sidebar a').forEach(a => a.classList.toggle('active', a.dataset.route === key));
+    setMod(r.mod);
+    document.body.classList.toggle('mod-school', r.mod === 'school');
+    document.querySelectorAll('.mod-switch [data-mod]').forEach(b => b.classList.toggle('active', b.dataset.mod === r.mod));
+    const key = (r.mod === 'school' && r.name !== 'data' ? 's/' : '') + r.name + (r.arg ? '/' + r.arg : '');
+    document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.route === key));
     const v = $('#view');
     v.innerHTML = '';
     document.body.classList.remove('menu-open');
     try {
         if (!state.snaps.length && r.name !== 'data') v.append(emptyState());
-        else routes[r.name](v, r);
+        else routes[r.mod][r.name](v, r);
     } catch (e) {
         console.error(e);
         v.append(h(`<div class="card"><div class="card-body">Something went wrong: ${esc(e.message)}</div></div>`));
@@ -1035,6 +1422,12 @@ async function init() {
     $('#backdrop').onclick = () => document.body.classList.remove('menu-open');
     $('#curDate').onchange = e => { setCur(e.target.value); fillDateSelects(); render(); };
     $('#prevDate').onchange = e => { state.prev = e.target.value; render(); };
+    // Module switch keeps the same page (dashboard, blocks, ...) where possible
+    document.querySelectorAll('.mod-switch [data-mod]').forEach(b => { b.onclick = () => {
+        const r = parseHash();
+        const page = r.name === 'data' ? 'dashboard' : r.name + (r.arg && b.dataset.mod === r.mod ? '/' + r.arg : '');
+        location.hash = (b.dataset.mod === 'school' ? '#/s/' : '#/') + page;
+    }; });
     window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
     await DB.open();
     await reload();

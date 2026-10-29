@@ -74,6 +74,15 @@ button, select, input { font: inherit; }
 }
 #sidebar nav a:hover { background: var(--bg); }
 #sidebar nav a.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.mod-switch { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 4px; margin: 2px 2px 4px; background: var(--bg); border-radius: 10px; }
+.mod-switch button {
+    border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; cursor: pointer;
+    text-align: left; font-size: 13px; color: var(--muted);
+}
+.mod-switch button:hover { color: var(--text); }
+.mod-switch button.active { background: var(--brand); color: #fff; font-weight: 600; box-shadow: 0 1px 4px rgba(26, 35, 126, .3); }
+.nav-school, body.mod-school .nav-teacher { display: none; }
+body.mod-school .nav-school { display: block; }
 .nav-group { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 12px 12px 4px; }
 .side-foot { display: flex; flex-direction: column; gap: 10px; font-size: 11px; color: var(--muted); padding: 16px 12px; margin-top: 12px; border-top: 1px solid var(--line); }
 .side-credit { background: var(--brand-soft); color: var(--brand); border-radius: 8px; padding: 8px 10px; font-size: 11.5px; line-height: 1.4; }
@@ -188,9 +197,9 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .c-bad { background: var(--bad); }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-.badge.full, .badge.Leading { background: var(--good-soft); color: var(--good); }
+.badge.full, .badge.Leading, .badge.done { background: var(--good-soft); color: var(--good); }
 .badge.part, .badge.Moderate { background: var(--mid-soft); color: #9a5b00; }
-.badge.zero, .badge.Lagging { background: var(--bad-soft); color: var(--bad); }
+.badge.zero, .badge.Lagging, .badge.pending { background: var(--bad-soft); color: var(--bad); }
 .badge.na { background: #eee; color: var(--na); }
 .badge.repo { background: var(--brand-soft); color: var(--brand); }
 

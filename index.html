@@ -26,25 +26,44 @@
 
 <div class="layout">
     <aside id="sidebar">
+        <div class="mod-switch" role="group" aria-label="Module">
+            <button data-mod="teacher" class="active">&#128105;&#8205;&#127979; Teacher Onboarding</button>
+            <button data-mod="school">&#127979; School Onboarding</button>
+        </div>
         <nav>
-            <div class="nav-group">Overview</div>
-            <a href="#/dashboard" data-route="dashboard">&#128202; Dashboard</a>
-            <a href="#/blocks" data-route="blocks">&#127970; Block-wise Status</a>
-            <a href="#/rank" data-route="rank">&#127942; Leading &amp; Lagging</a>
-            <div class="nav-group">Schools</div>
-            <a href="#/schools" data-route="schools">&#128203; All Schools</a>
-            <a href="#/schools/full" data-route="schools/full"><i class="dot full"></i> 100% Schools</a>
-            <a href="#/schools/part" data-route="schools/part"><i class="dot part"></i> 1&ndash;99% Schools</a>
-            <a href="#/schools/zero" data-route="schools/zero"><i class="dot zero"></i> 0% Schools</a>
-            <div class="nav-group">Progress</div>
-            <a href="#/compare" data-route="compare">&#8644; Day-wise Comparison</a>
-            <a href="#/trend" data-route="trend">&#128200; Daily Trend</a>
+            <div class="nav-teacher">
+                <div class="nav-group">Overview</div>
+                <a href="#/dashboard" data-route="dashboard">&#128202; Dashboard</a>
+                <a href="#/blocks" data-route="blocks">&#127970; Block-wise Status</a>
+                <a href="#/rank" data-route="rank">&#127942; Leading &amp; Lagging</a>
+                <div class="nav-group">Schools</div>
+                <a href="#/schools" data-route="schools">&#128203; All Schools</a>
+                <a href="#/schools/full" data-route="schools/full"><i class="dot full"></i> 100% Schools</a>
+                <a href="#/schools/part" data-route="schools/part"><i class="dot part"></i> 1&ndash;99% Schools</a>
+                <a href="#/schools/zero" data-route="schools/zero"><i class="dot zero"></i> 0% Schools</a>
+                <div class="nav-group">Progress</div>
+                <a href="#/compare" data-route="compare">&#8644; Day-wise Comparison</a>
+                <a href="#/trend" data-route="trend">&#128200; Daily Trend</a>
+            </div>
+            <div class="nav-school">
+                <div class="nav-group">Overview</div>
+                <a href="#/s/dashboard" data-route="s/dashboard">&#128202; Dashboard</a>
+                <a href="#/s/blocks" data-route="s/blocks">&#127970; Block-wise Status</a>
+                <a href="#/s/rank" data-route="s/rank">&#127942; Leading &amp; Lagging</a>
+                <div class="nav-group">Schools</div>
+                <a href="#/s/schools" data-route="s/schools">&#128203; All Schools</a>
+                <a href="#/s/schools/done" data-route="s/schools/done"><i class="dot full"></i> Onboarded Schools</a>
+                <a href="#/s/schools/pending" data-route="s/schools/pending"><i class="dot zero"></i> Pending Schools</a>
+                <div class="nav-group">Progress</div>
+                <a href="#/s/compare" data-route="s/compare">&#8644; Day-wise Comparison</a>
+                <a href="#/s/trend" data-route="s/trend">&#128200; Daily Trend</a>
+            </div>
             <div class="nav-group">Data</div>
             <a href="#/data" data-route="data">&#11014; Upload / Manage Data</a>
         </nav>
         <div class="side-foot">
             <span class="side-credit">An in-house production of<br><b>SSM, Purba Bardhaman</b></span>
-            <span>Source: PRASHAST portal &mdash; Teacher Onboarding, School Wise Report</span>
+            <span>Source: PRASHAST portal &mdash; Teacher Onboarding (School Wise Report) and Schools Onboarding Status</span>
         </div>
     </aside>
     <div id="backdrop"></div>
