@@ -308,6 +308,12 @@ td.empty { text-align: center; color: var(--muted); padding: 24px; }
 .upload-hint p { margin: 0; font-size: 12.5px; color: var(--muted); }
 .help { font-size: 12.5px; color: var(--muted); }
 code { background: #f0f1f7; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.login-card { max-width: 380px; }
+.login { display: flex; flex-direction: column; gap: 8px; }
+.login label { font-size: 13px; font-weight: 600; }
+.login input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.login .btn { align-self: flex-start; }
+.login-err { color: var(--bad); margin: 0; font-size: 13px; }
 .empty-state { text-align: center; padding: 48px 16px; }
 .empty-state h2 { color: var(--brand); }
 

@@ -59,6 +59,10 @@ The layout works on phones, tablets and desktops.
    The date is read from the file name. If the name has no date, choose one in the *Data date* box.
 3. Uploading again for the same date replaces that day's data.
 
+**Upload / Manage Data is password protected.** After unlocking, it stays open until the browser tab is closed or *Lock* is pressed.
+Only a SHA-256 hash of the password is in `js/app.js` (`ADMIN_HASH`). To change the password, put the hash of the new one there.
+This is a static site, so the lock keeps casual visitors out of the upload page; it is not server-side security.
+
 Uploaded data is stored **in that browser only** (IndexedDB). Use *Download backup* to move it to another device.
 
 ## Publish on GitHub Pages

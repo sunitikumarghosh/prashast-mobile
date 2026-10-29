@@ -942,8 +942,52 @@ function pageRank(v) {
     if (P) tableCard(g3, `Best Performing Schools since ${fmtD(P.date)} (Top 50)`, { cols: [...scols, C.dO], rows: sr.filter(x => x.dO > 0).sort((a, b) => b.dO - a.dO).slice(0, 50) }, sub);
 }
 
+// ---------------------------------------------------------------- Upload / Manage Data password
+// Static site: only the SHA-256 hash of the password is kept here; unlocking lasts for the browser tab session.
+const ADMIN_HASH = 'ab05e582c7455107115fe4a1de5320598c3e9e879d7a243b3f944bb265ea6573';
+const UNLOCK_KEY = 'prashast-admin-unlocked';
+let adminUnlocked = false;
+const isUnlocked = () => {
+    if (adminUnlocked) return true;
+    try { return sessionStorage.getItem(UNLOCK_KEY) === ADMIN_HASH; } catch (e) { return false; }
+};
+async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function lockAdmin() {
+    adminUnlocked = false;
+    try { sessionStorage.removeItem(UNLOCK_KEY); } catch (e) { /* storage blocked */ }
+}
+
+function pageLogin(v) {
+    pageHead(v, 'Upload / Manage Data', 'This section is password protected.');
+    const box = h(`<div class="card login-card"><div class="card-body">
+        <form class="login">
+            <label for="admPwd">Admin password</label>
+            <input type="password" id="admPwd" autocomplete="current-password" required>
+            <button class="btn primary" type="submit">Unlock</button>
+            <p class="login-err" hidden>Incorrect password. Please try again.</p>
+        </form>
+    </div></div>`);
+    v.append(box);
+    const form = $('form', box), pwd = $('#admPwd', box), err = $('.login-err', box);
+    pwd.focus();
+    form.onsubmit = async e => {
+        e.preventDefault();
+        if (!window.crypto || !crypto.subtle) { err.textContent = 'This browser cannot check the password here. Open the portal over https.'; err.hidden = false; return; }
+        if (await sha256(pwd.value) !== ADMIN_HASH) { err.hidden = false; pwd.select(); return; }
+        adminUnlocked = true;
+        try { sessionStorage.setItem(UNLOCK_KEY, ADMIN_HASH); } catch (e2) { /* storage blocked: unlocked for this page load only */ }
+        render();
+    };
+}
+
 function pageData(v) {
-    pageHead(v, 'Upload / Manage Data', 'Upload the combined Excel files every day. One file is kept per date for each module; the module is detected from the file.');
+    if (!isUnlocked()) { pageLogin(v); return; }
+    const lock = h('<div class="actions"><button class="btn">&#128274; Lock</button></div>');
+    lock.firstElementChild.onclick = () => { lockAdmin(); render(); };
+    pageHead(v, 'Upload / Manage Data', 'Upload the combined Excel files every day. One file is kept per date for each module; the module is detected from the file.', lock);
 
     const up = card(v, 'Upload daily Excel');
     up.append(h(`<div class="upload">
